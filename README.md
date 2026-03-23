@@ -16,23 +16,37 @@ One line of code. Automatic tenant isolation.
 - **SQL injection safe** — UUID validation by default, customizable validator
 - **NestJS 10 & 11** compatible, **Prisma 5 & 6** compatible
 
+## Prerequisites
+
+- Node.js >= 18
+- NestJS 10 or 11
+- Prisma 5 or 6
+- PostgreSQL (with RLS support)
+
 ## Installation
 
 ```bash
 npm install @nestarc/tenancy
 ```
 
-**Peer dependencies:** `@nestjs/common`, `@nestjs/core`, `@prisma/client`, `reflect-metadata`, `rxjs`
-
 ## Quick Start
 
 ### 1. Enable RLS on your PostgreSQL tables
 
+Every table that needs tenant isolation must have a `tenant_id` column and an RLS policy:
+
 ```sql
+-- Ensure your table has a tenant_id column
+ALTER TABLE users ADD COLUMN tenant_id TEXT NOT NULL;
+
+-- Enable RLS
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
+-- Create isolation policy
 CREATE POLICY tenant_isolation ON users
   USING (tenant_id = current_setting('app.current_tenant')::text);
+
+-- Repeat for each tenant-scoped table
 ```
 
 ### 2. Register the module
@@ -58,17 +72,18 @@ import { PrismaClient } from '@prisma/client';
 import { TenancyService, createPrismaTenancyExtension } from '@nestarc/tenancy';
 
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleInit {
+export class PrismaService implements OnModuleInit {
+  public readonly client;
+
   constructor(private readonly tenancyService: TenancyService) {
-    super();
-    // Apply the tenancy extension
-    return this.$extends(
+    const prisma = new PrismaClient();
+    this.client = prisma.$extends(
       createPrismaTenancyExtension(tenancyService),
-    ) as this;
+    );
   }
 
   async onModuleInit() {
-    await this.$connect();
+    await this.client.$connect();
   }
 }
 ```
@@ -76,21 +91,26 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
 ### 4. Use it
 
 ```typescript
+import { Injectable } from '@nestjs/common';
+
 @Injectable()
 export class UsersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly tenancy: TenancyService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   findAll() {
     // Automatically filtered by RLS — only current tenant's data returned
-    return this.prisma.user.findMany();
+    return this.prisma.client.user.findMany();
   }
 }
 ```
 
-Every request with `X-Tenant-Id: <uuid>` header will automatically scope all Prisma queries to that tenant.
+Send requests with the tenant header:
+
+```bash
+curl -H "X-Tenant-Id: 550e8400-e29b-41d4-a716-446655440000" http://localhost:3000/users
+```
+
+All Prisma queries are automatically scoped to that tenant via RLS.
 
 ## API
 
@@ -126,7 +146,7 @@ export class SomeService {
   constructor(private readonly tenancy: TenancyService) {}
 
   doSomething() {
-    const tenantId = this.tenancy.getCurrentTenant();       // string | null
+    const tenantOrNull = this.tenancy.getCurrentTenant();    // string | null
     const tenantId = this.tenancy.getCurrentTenantOrThrow(); // string (throws if missing)
   }
 }
@@ -135,24 +155,32 @@ export class SomeService {
 ### @CurrentTenant() Decorator
 
 ```typescript
+import { Controller, Get } from '@nestjs/common';
+import { CurrentTenant } from '@nestarc/tenancy';
+
 @Controller('users')
 export class UsersController {
-  @Get()
-  findAll(@CurrentTenant() tenantId: string) {
-    return this.usersService.findAll(tenantId);
+  @Get('me')
+  whoAmI(@CurrentTenant() tenantId: string) {
+    return { tenantId };
   }
 }
 ```
 
 ### @BypassTenancy() Decorator
 
+Skip tenant enforcement on specific routes (e.g., health checks, public endpoints):
+
 ```typescript
+import { Controller, Get } from '@nestjs/common';
+import { BypassTenancy } from '@nestarc/tenancy';
+
 @Controller('health')
 export class HealthController {
   @BypassTenancy()
   @Get()
   check() {
-    return { status: 'ok' }; // No tenant required
+    return { status: 'ok' }; // No tenant header required
   }
 }
 ```
@@ -178,6 +206,14 @@ TenancyModule.forRoot({
 })
 ```
 
+## Error Responses
+
+| Scenario | Status | Message |
+|----------|--------|---------|
+| Missing tenant header (no `@BypassTenancy`) | 403 | `Tenant ID is required` |
+| Invalid tenant ID format | 400 | `Invalid tenant ID format` |
+| Non-HTTP context (WebSocket, gRPC) | — | Guard skips (no enforcement) |
+
 ## Security
 
 - **SQL Injection**: Tenant IDs are validated before use. Default: UUID format. PostgreSQL `SET` commands cannot use bind parameters, so validation is the primary defense.
@@ -187,10 +223,10 @@ TenancyModule.forRoot({
 ## How It Works
 
 ```
-HTTP Request (X-Tenant-Id: abc-123)
+HTTP Request (X-Tenant-Id: 550e8400-e29b-41d4-a716-446655440000)
   → TenantMiddleware (extracts & validates tenant ID)
     → AsyncLocalStorage (stores tenant context)
-      → TenancyGuard (rejects requests without tenant, unless @BypassTenancy)
+      → TenancyGuard (rejects if missing, unless @BypassTenancy)
         → Your Controller / Service
           → Prisma Extension ($transaction → SET LOCAL → query)
             → PostgreSQL RLS (automatic row filtering)
