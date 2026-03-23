@@ -44,8 +44,10 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- Create isolation policy
 CREATE POLICY tenant_isolation ON users
-  USING (tenant_id = current_setting('app.current_tenant')::text);
+  USING (tenant_id = current_setting('app.current_tenant', true)::text);
 
+-- The `true` parameter means missing_ok: returns '' instead of error when unset.
+-- This ensures queries without tenant context return 0 rows (not an error).
 -- Repeat for each tenant-scoped table
 ```
 
@@ -145,7 +147,7 @@ All Prisma queries are automatically scoped to that tenant via RLS.
 TenancyModule.forRoot({
   tenantExtractor: 'X-Tenant-Id',           // header name (string)
   dbSettingKey: 'app.current_tenant',        // PostgreSQL setting (default)
-  validateTenantId: (id) => UUID_REGEX.test(id), // custom validator (default: UUID)
+  validateTenantId: (id) => UUID_REGEX.test(id), // sync or async (default: UUID)
 })
 
 // Async with factory
@@ -159,6 +161,11 @@ TenancyModule.forRootAsync({
 // Async with class
 TenancyModule.forRootAsync({
   useClass: TenancyConfigService,
+})
+
+// Async with existing provider
+TenancyModule.forRootAsync({
+  useExisting: TenancyConfigService,
 })
 ```
 
