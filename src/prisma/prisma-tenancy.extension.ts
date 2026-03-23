@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { TenancyService } from '../services/tenancy.service';
 import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 
@@ -7,7 +8,16 @@ export interface PrismaTenancyExtensionOptions {
 
 /**
  * Creates a Prisma Client Extension that sets the PostgreSQL RLS context
- * (SET LOCAL) before every query when a tenant context exists.
+ * before every model query when a tenant context exists.
+ *
+ * Uses `Prisma.defineExtension` to access the base client via closure,
+ * then wraps each query in a batch transaction:
+ *   1. `SELECT set_config(key, tenantId, TRUE)` — sets the RLS variable (transaction-local)
+ *   2. `query(args)` — the original query, now filtered by RLS
+ *
+ * SECURITY: Uses `$executeRaw` tagged template with bind parameters.
+ * `set_config()` accepts parameterized values, unlike `SET LOCAL` which
+ * requires string interpolation. This eliminates SQL injection risk entirely.
  *
  * Usage:
  * ```typescript
@@ -15,11 +25,6 @@ export interface PrismaTenancyExtensionOptions {
  *   createPrismaTenancyExtension(tenancyService)
  * );
  * ```
- *
- * SECURITY: tenantId is pre-validated by middleware (UUID by default).
- * PostgreSQL SET commands do not support bind parameters ($1),
- * so $executeRawUnsafe is used with the already-validated value.
- * SET LOCAL is scoped to the interactive transaction.
  */
 export function createPrismaTenancyExtension(
   tenancyService: TenancyService,
@@ -27,40 +32,37 @@ export function createPrismaTenancyExtension(
 ) {
   const settingKey = options?.dbSettingKey ?? DEFAULT_DB_SETTING_KEY;
 
-  return {
-    query: {
-      async $allOperations(params: {
-        args: any;
-        query: (args: any) => Promise<any>;
-        model?: string;
-        operation: string;
-        __prismaRawClient?: any;
-      }) {
-        const { args, query, model, operation, __prismaRawClient } = params;
-        const tenantId = tenancyService.getCurrentTenant();
+  return Prisma.defineExtension((prisma) => {
+    // Prisma's defineExtension callback receives a Client type that
+    // doesn't fully expose $executeRaw/$transaction in its generic form.
+    // Cast to access these methods which are available at runtime.
+    const baseClient = prisma as any;
 
-        if (!tenantId) {
-          return query(args);
-        }
+    return baseClient.$extends({
+      query: {
+        $allModels: {
+          async $allOperations({
+            args,
+            query,
+          }: {
+            args: any;
+            query: (args: any) => Promise<any>;
+          }) {
+            const tenantId = tenancyService.getCurrentTenant();
 
-        const rawClient = __prismaRawClient;
+            if (!tenantId) {
+              return query(args);
+            }
 
-        if (!rawClient || !rawClient.$transaction) {
-          return query(args);
-        }
+            const [, result] = await baseClient.$transaction([
+              baseClient.$executeRaw`SELECT set_config(${settingKey}, ${tenantId}, TRUE)`,
+              query(args),
+            ]);
 
-        return rawClient.$transaction(async (tx: any) => {
-          await tx.$executeRawUnsafe(
-            `SET LOCAL "${settingKey}" = '${tenantId}'`,
-          );
-
-          if (model && tx[model] && tx[model][operation]) {
-            return tx[model][operation](args);
-          }
-
-          return query(args);
-        });
+            return result;
+          },
+        },
       },
-    },
-  };
+    });
+  });
 }

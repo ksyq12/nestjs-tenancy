@@ -28,3 +28,6 @@ lerna-debug.log*
 .vscode
 *.swp
 *.swo
+
+# Prisma generated client (E2E tests)
+test/e2e/generated

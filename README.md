@@ -13,7 +13,7 @@ One line of code. Automatic tenant isolation.
 - **AsyncLocalStorage** — Zero-overhead request-scoped tenant context (no `REQUEST` scope)
 - **Prisma Client Extensions** — Automatic `SET LOCAL` before every query
 - **Flexible extraction** — Header-based (built-in), custom strategies via `TenantExtractor` interface
-- **SQL injection safe** — UUID validation by default, customizable validator
+- **SQL injection safe** — `set_config()` with bind parameters, plus UUID validation by default
 - **NestJS 10 & 11** compatible, **Prisma 5 & 6** compatible
 
 ## Prerequisites
@@ -84,6 +84,30 @@ export class PrismaService implements OnModuleInit {
 
   async onModuleInit() {
     await this.client.$connect();
+  }
+}
+```
+
+If you use a custom `dbSettingKey` in your module options, forward it to the extension:
+
+```typescript
+import { Inject } from '@nestjs/common';
+import { TENANCY_MODULE_OPTIONS, TenancyModuleOptions } from '@nestarc/tenancy';
+
+@Injectable()
+export class PrismaService implements OnModuleInit {
+  public readonly client;
+
+  constructor(
+    tenancyService: TenancyService,
+    @Inject(TENANCY_MODULE_OPTIONS) options: TenancyModuleOptions,
+  ) {
+    const prisma = new PrismaClient();
+    this.client = prisma.$extends(
+      createPrismaTenancyExtension(tenancyService, {
+        dbSettingKey: options.dbSettingKey,
+      }),
+    );
   }
 }
 ```
@@ -216,8 +240,8 @@ TenancyModule.forRoot({
 
 ## Security
 
-- **SQL Injection**: Tenant IDs are validated before use. Default: UUID format. PostgreSQL `SET` commands cannot use bind parameters, so validation is the primary defense.
-- **`SET LOCAL`**: Scoped to the interactive transaction — no cross-request leakage via connection pool.
+- **SQL Injection**: The Prisma extension uses `set_config()` with bind parameters via `$executeRaw` tagged template. This eliminates SQL injection risk at the database layer. Additionally, tenant IDs are validated by the middleware (UUID format by default).
+- **Transaction-scoped**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL` — scoped to the batch transaction. No cross-request leakage via connection pool.
 - **Custom validators**: If your tenant IDs are not UUIDs, provide a `validateTenantId` function that rejects any unsafe input.
 
 ## How It Works
@@ -228,7 +252,7 @@ HTTP Request (X-Tenant-Id: 550e8400-e29b-41d4-a716-446655440000)
     → AsyncLocalStorage (stores tenant context)
       → TenancyGuard (rejects if missing, unless @BypassTenancy)
         → Your Controller / Service
-          → Prisma Extension ($transaction → SET LOCAL → query)
+          → Prisma Extension ($transaction → set_config() → query)
             → PostgreSQL RLS (automatic row filtering)
 ```
 

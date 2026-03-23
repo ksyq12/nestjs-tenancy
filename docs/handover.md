@@ -68,7 +68,7 @@ HTTP 요청 → Middleware (헤더에서 tenant_id 추출)
 @Module({
   imports: [
     TenancyModule.forRoot({
-      tenantIdentifier: 'X-TENANT-ID',  // 헤더에서 추출
+      tenantExtractor: 'X-TENANT-ID',  // 헤더에서 추출
       // 또는 subdomain, jwt claim 등 지원
     }),
   ],
@@ -79,7 +79,7 @@ export class AppModule {}
 TenancyModule.forRootAsync({
   inject: [ConfigService],
   useFactory: (config: ConfigService) => ({
-    tenantIdentifier: config.get('TENANT_HEADER'),
+    tenantExtractor: config.get('TENANT_HEADER'),
   }),
 })
 
@@ -135,32 +135,40 @@ getAllUsers() { ... }
 
 ---
 
-## 현재 파일 구조
+## 파일 구조
 
 ```
 nestjs-tenancy/
-├── package.json                # 생성 완료 — peerDeps, 메타데이터 설정됨
-├── HANDOVER.md                 # 이 문서
+├── package.json
+├── tsconfig.json / tsconfig.build.json
+├── jest.config.ts
+├── docker-compose.yml             # E2E용 PostgreSQL
+├── README.md
+├── docs/handover.md               # 이 문서
 ├── src/
-│   ├── decorators/             # @CurrentTenant(), @BypassTenancy()
-│   ├── interfaces/             # TenancyModuleOptions, TenantExtractor 등
-│   ├── providers/              # TenancyService, PrismaTenancyExtension
-│   ├── middleware/             # TenantExtractionMiddleware
-│   └── guards/                # TenancyGuard (tenant 필수 검증)
-├── test/                       # 유닛 테스트
-└── examples/                   # 사용 예제
+│   ├── index.ts                   # 배럴 export
+│   ├── tenancy.module.ts          # DynamicModule (forRoot/forRootAsync)
+│   ├── tenancy.constants.ts       # 인젝션 토큰, UUID 정규식
+│   ├── interfaces/
+│   │   ├── tenancy-module-options.interface.ts
+│   │   └── tenant-extractor.interface.ts
+│   ├── services/
+│   │   ├── tenancy-context.ts     # AsyncLocalStorage 래퍼
+│   │   └── tenancy.service.ts     # 공개 서비스
+│   ├── middleware/
+│   │   └── tenant.middleware.ts   # 요청에서 tenant 추출 + 검증
+│   ├── guards/
+│   │   └── tenancy.guard.ts       # HTTP-only tenant 강제
+│   ├── decorators/
+│   │   ├── current-tenant.decorator.ts
+│   │   └── bypass-tenancy.decorator.ts
+│   ├── extractors/
+│   │   └── header.extractor.ts    # 헤더 기반 추출
+│   └── prisma/
+│       └── prisma-tenancy.extension.ts  # Prisma $extends (set_config + batch tx)
+├── test/                          # 유닛 테스트 (38개)
+└── test/e2e/                      # E2E 테스트 (12개, Docker + PostgreSQL)
 ```
-
-### 아직 생성 안 된 파일
-
-- `tsconfig.json`
-- `.eslintrc.js`
-- `jest.config.ts`
-- `.gitignore`
-- `README.md`
-- `src/index.ts` (배럴 파일)
-- `src/tenancy.module.ts` (핵심 모듈)
-- 각 디렉토리 내 실제 구현 파일들
 
 ---
 

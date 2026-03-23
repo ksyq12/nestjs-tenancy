@@ -1,0 +1,20 @@
+// Test-only Prisma schema for E2E tests.
+// Matches the users table created by setup.sql.
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int    @id @default(autoincrement())
+  tenant_id String
+  name      String
+  email     String
+
+  @@map("users")
+}
