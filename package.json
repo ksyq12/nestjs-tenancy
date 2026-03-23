@@ -4,7 +4,9 @@
   "description": "Multi-tenancy module for NestJS with PostgreSQL Row Level Security (RLS) and Prisma support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -19,9 +21,21 @@
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["nestjs", "multi-tenancy", "tenancy", "rls", "row-level-security", "prisma", "postgresql", "saas"],
+  "keywords": [
+    "nestjs",
+    "multi-tenancy",
+    "tenancy",
+    "rls",
+    "row-level-security",
+    "prisma",
+    "postgresql",
+    "saas"
+  ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/ksyq12/nestjs-tenancy" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ksyq12/nestjs-tenancy"
+  },
   "peerDependencies": {
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0",
@@ -42,6 +56,7 @@
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.0.0",
     "ts-jest": "^29.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   }
 }
