@@ -1,6 +1,9 @@
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenancyService } from '../src/services/tenancy.service';
-import { createPrismaTenancyExtension } from '../src/prisma/prisma-tenancy.extension';
+import {
+  createPrismaTenancyExtension,
+  PrismaTenancyExtensionOptions,
+} from '../src/prisma/prisma-tenancy.extension';
 
 /**
  * Unit tests for createPrismaTenancyExtension.
@@ -56,6 +59,16 @@ describe('createPrismaTenancyExtension', () => {
     return extensionConfig.query.$allModels.$allOperations;
   }
 
+  function getHandlerWithAutoInject(
+    mockPrisma: any,
+    opts?: Partial<PrismaTenancyExtensionOptions>,
+  ) {
+    capturedFactory = null;
+    createPrismaTenancyExtension(service, { autoInjectTenantId: true, ...opts });
+    const extensionConfig = capturedFactory!(mockPrisma);
+    return extensionConfig.query.$allModels.$allOperations;
+  }
+
   it('should return a Prisma.defineExtension result', () => {
     const result = createPrismaTenancyExtension(service);
     expect(result).toBeDefined();
@@ -68,6 +81,8 @@ describe('createPrismaTenancyExtension', () => {
 
     const mockQuery = jest.fn().mockResolvedValue([{ id: 1 }]);
     const result = await handler({
+      model: 'TestModel',
+      operation: 'findMany',
       args: { where: { id: 1 } },
       query: mockQuery,
     });
@@ -92,6 +107,8 @@ describe('createPrismaTenancyExtension', () => {
       context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
         try {
           const result = await handler({
+            model: 'TestModel',
+            operation: 'findMany',
             args: { where: { id: 1 } },
             query: mockQuery,
           });
@@ -130,7 +147,12 @@ describe('createPrismaTenancyExtension', () => {
     await new Promise<void>((resolve, reject) => {
       context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
         try {
-          await handler({ args: {}, query: jest.fn().mockReturnValue(Promise.resolve([])) });
+          await handler({
+            model: 'TestModel',
+            operation: 'findMany',
+            args: {},
+            query: jest.fn().mockReturnValue(Promise.resolve([])),
+          });
 
           // Verify $executeRaw was called via tagged template
           // The first arg to $transaction is the array, and the first element
@@ -155,6 +177,8 @@ describe('createPrismaTenancyExtension', () => {
       context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
         try {
           const result = await handler({
+            model: 'TestModel',
+            operation: 'findMany',
             args: {},
             query: jest.fn().mockReturnValue(Promise.resolve(expectedData)),
           });
@@ -164,6 +188,279 @@ describe('createPrismaTenancyExtension', () => {
         } catch (e) {
           reject(e);
         }
+      });
+    });
+  });
+
+  describe('sharedModels', () => {
+    it('should skip set_config for shared models', async () => {
+      const { mockPrisma, mockTransaction, mockExecuteRaw } = buildMockPrisma();
+
+      capturedFactory = null;
+      createPrismaTenancyExtension(service, { sharedModels: ['Country'] });
+      const extensionConfig = capturedFactory!(mockPrisma);
+      const handler = extensionConfig.query.$allModels.$allOperations;
+
+      const mockQuery = jest.fn().mockResolvedValue([{ code: 'US' }]);
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            const result = await handler({
+              model: 'Country',
+              operation: 'findMany',
+              args: {},
+              query: mockQuery,
+            });
+
+            expect(mockQuery).toHaveBeenCalledWith({});
+            expect(mockTransaction).not.toHaveBeenCalled();
+            expect(mockExecuteRaw).not.toHaveBeenCalled();
+            expect(result).toEqual([{ code: 'US' }]);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should still apply set_config for non-shared models', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+
+      capturedFactory = null;
+      createPrismaTenancyExtension(service, { sharedModels: ['Country'] });
+      const extensionConfig = capturedFactory!(mockPrisma);
+      const handler = extensionConfig.query.$allModels.$allOperations;
+
+      mockTransaction.mockResolvedValue([1, [{ id: 1 }]]);
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'findMany',
+              args: {},
+              query: jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }])),
+            });
+
+            expect(mockTransaction).toHaveBeenCalledTimes(1);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+  });
+
+  describe('autoInjectTenantId', () => {
+    it('should inject tenant_id on create', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { id: 1, tenant_id: 'tenant-id' }]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma);
+      const mockQuery = jest.fn().mockReturnValue(
+        Promise.resolve({ id: 1, tenant_id: 'tenant-id' }),
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'create',
+              args: { data: { name: 'Test Order' } },
+              query: mockQuery,
+            });
+
+            expect(mockQuery).toHaveBeenCalledWith({
+              data: { name: 'Test Order', tenant_id: 'tenant-id' },
+            });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should inject tenant_id on createMany (array data)', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { count: 2 }]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma);
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ count: 2 }));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'createMany',
+              args: { data: [{ name: 'A' }, { name: 'B' }] },
+              query: mockQuery,
+            });
+
+            expect(mockQuery).toHaveBeenCalledWith({
+              data: [
+                { name: 'A', tenant_id: 'tenant-id' },
+                { name: 'B', tenant_id: 'tenant-id' },
+              ],
+            });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should inject into upsert create but not update', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { id: 1 }]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma);
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'upsert',
+              args: {
+                where: { id: 1 },
+                create: { name: 'New Order' },
+                update: { name: 'Updated Order' },
+              },
+              query: mockQuery,
+            });
+
+            expect(mockQuery).toHaveBeenCalledWith({
+              where: { id: 1 },
+              create: { name: 'New Order', tenant_id: 'tenant-id' },
+              update: { name: 'Updated Order' },
+            });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should NOT inject on update operations', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { id: 1 }]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma);
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'update',
+              args: { where: { id: 1 }, data: { name: 'Updated' } },
+              query: mockQuery,
+            });
+
+            expect(mockQuery).toHaveBeenCalledWith({
+              where: { id: 1 },
+              data: { name: 'Updated' },
+            });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should use custom tenantIdField', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { id: 1 }]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma, { tenantIdField: 'org_id' });
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'create',
+              args: { data: { name: 'Test' } },
+              query: mockQuery,
+            });
+
+            expect(mockQuery).toHaveBeenCalledWith({
+              data: { name: 'Test', org_id: 'tenant-id' },
+            });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should skip injection for sharedModels', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, [{ code: 'US' }]]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma, { sharedModels: ['Country'] });
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve([{ code: 'US' }]));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Country',
+              operation: 'create',
+              args: { data: { code: 'US' } },
+              query: mockQuery,
+            });
+
+            // Should pass through without injecting tenant_id
+            expect(mockQuery).toHaveBeenCalledWith({ data: { code: 'US' } });
+            expect(mockTransaction).not.toHaveBeenCalled();
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
+    it('should NOT inject when autoInjectTenantId is false (default)', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { id: 1 }]);
+
+      // Use default handler (no autoInjectTenantId)
+      const handler = getHandler(mockPrisma);
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'create',
+              args: { data: { name: 'Test' } },
+              query: mockQuery,
+            });
+
+            // args should NOT have tenant_id injected
+            expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'Test' } });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
       });
     });
   });
