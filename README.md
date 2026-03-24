@@ -11,8 +11,11 @@ One line of code. Automatic tenant isolation.
 
 - **RLS-based isolation** — PostgreSQL enforces tenant boundaries at the database level
 - **AsyncLocalStorage** — Zero-overhead request-scoped tenant context (no `REQUEST` scope)
-- **Prisma Client Extensions** — Automatic `SET LOCAL` before every query
-- **Flexible extraction** — Header-based (built-in), custom strategies via `TenantExtractor` interface
+- **Prisma Client Extensions** — Automatic `set_config()` before every query
+- **5 built-in extractors** — Header, Subdomain, JWT Claim, Path, Composite (fallback chain)
+- **Lifecycle hooks** — `onTenantResolved` / `onTenantNotFound` for logging, auditing, custom error handling
+- **Auto-inject tenant ID** — Optionally inject `tenant_id` into `create` / `createMany` / `upsert` operations
+- **Shared models** — Whitelist models that skip RLS (e.g., `Country`, `Currency`)
 - **SQL injection safe** — `set_config()` with bind parameters, plus UUID validation by default
 - **NestJS 10 & 11** compatible, **Prisma 5 & 6** compatible
 
@@ -104,29 +107,25 @@ export class PrismaService implements OnModuleInit {
 }
 ```
 
-If you use a custom `dbSettingKey` in your module options, forward it to the extension:
+#### Extension Options
 
 ```typescript
-import { Inject } from '@nestjs/common';
-import { TENANCY_MODULE_OPTIONS, TenancyModuleOptions } from '@nestarc/tenancy';
-
-@Injectable()
-export class PrismaService implements OnModuleInit {
-  public readonly client;
-
-  constructor(
-    tenancyService: TenancyService,
-    @Inject(TENANCY_MODULE_OPTIONS) options: TenancyModuleOptions,
-  ) {
-    const prisma = new PrismaClient();
-    this.client = prisma.$extends(
-      createPrismaTenancyExtension(tenancyService, {
-        dbSettingKey: options.dbSettingKey,
-      }),
-    );
-  }
-}
+createPrismaTenancyExtension(tenancyService, {
+  dbSettingKey: 'app.current_tenant',  // PostgreSQL setting key (default)
+  autoInjectTenantId: true,            // Auto-inject tenant_id on create/upsert
+  tenantIdField: 'tenant_id',          // Column name for tenant ID (default)
+  sharedModels: ['Country', 'Currency'], // Models that skip RLS entirely
+})
 ```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `dbSettingKey` | `string` | `'app.current_tenant'` | PostgreSQL session variable name |
+| `autoInjectTenantId` | `boolean` | `false` | Auto-inject tenant ID into `create`, `createMany`, `createManyAndReturn`, `upsert` |
+| `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
+| `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
+
+> **Note:** When using interactive transactions (`$transaction(async (tx) => ...)`), the `set_config` call runs in a separate connection. Call `set_config` manually as the first statement inside interactive transactions.
 
 ### 4. Use it
 
@@ -230,26 +229,124 @@ export class HealthController {
 }
 ```
 
-### Custom Tenant Extractor
+### Tenant Extractors
+
+Five built-in extractors cover common multi-tenancy patterns:
+
+#### Header (default)
+
+```typescript
+TenancyModule.forRoot({
+  tenantExtractor: 'X-Tenant-Id', // shorthand for HeaderTenantExtractor
+})
+```
+
+#### Subdomain
+
+```typescript
+import { SubdomainTenantExtractor } from '@nestarc/tenancy';
+
+TenancyModule.forRoot({
+  tenantExtractor: new SubdomainTenantExtractor({
+    excludeSubdomains: ['www', 'api'], // optional, defaults to ['www']
+  }),
+  validateTenantId: (id) => /^[a-z0-9-]+$/.test(id),
+})
+// tenant1.app.com → 'tenant1'
+```
+
+#### JWT Claim
+
+```typescript
+import { JwtClaimTenantExtractor } from '@nestarc/tenancy';
+
+TenancyModule.forRoot({
+  tenantExtractor: new JwtClaimTenantExtractor({
+    claimKey: 'org_id',       // JWT payload key
+    headerName: 'authorization', // optional, defaults to 'authorization'
+  }),
+})
+// Authorization: Bearer eyJ... → payload.org_id
+```
+
+> **Security:** This extractor does **not** verify the JWT signature. Ensure an authentication guard (e.g., `@nestjs/passport`) runs before the tenancy middleware.
+
+#### Path Parameter
+
+```typescript
+import { PathTenantExtractor } from '@nestarc/tenancy';
+
+TenancyModule.forRoot({
+  tenantExtractor: new PathTenantExtractor({
+    pattern: '/api/tenants/:tenantId/resources',
+    paramName: 'tenantId',
+  }),
+})
+// /api/tenants/acme/resources → 'acme'
+```
+
+#### Composite (Fallback Chain)
+
+```typescript
+import {
+  CompositeTenantExtractor,
+  HeaderTenantExtractor,
+  SubdomainTenantExtractor,
+  JwtClaimTenantExtractor,
+} from '@nestarc/tenancy';
+
+TenancyModule.forRoot({
+  tenantExtractor: new CompositeTenantExtractor([
+    new HeaderTenantExtractor('X-Tenant-Id'),
+    new SubdomainTenantExtractor(),
+    new JwtClaimTenantExtractor({ claimKey: 'org_id' }),
+  ]),
+})
+// Tries each extractor in order, returns the first non-null result
+```
+
+#### Custom Extractor
 
 ```typescript
 import { TenantExtractor } from '@nestarc/tenancy';
 import { Request } from 'express';
 
-export class SubdomainExtractor implements TenantExtractor {
+export class CookieTenantExtractor implements TenantExtractor {
   extract(request: Request): string | null {
-    const host = request.hostname;
-    const subdomain = host.split('.')[0];
-    return subdomain === 'www' ? null : subdomain;
+    return request.cookies?.['tenant_id'] ?? null;
   }
 }
+```
 
-// Usage
+### Lifecycle Hooks
+
+React to tenant resolution events without extending the middleware:
+
+```typescript
 TenancyModule.forRoot({
-  tenantExtractor: new SubdomainExtractor(),
-  validateTenantId: (id) => /^[a-z0-9-]+$/.test(id),
+  tenantExtractor: 'X-Tenant-Id',
+  onTenantResolved: async (tenantId, req) => {
+    // Runs inside AsyncLocalStorage context — getCurrentTenant() works here
+    logger.info({ tenantId, path: req.path }, 'tenant resolved');
+    await auditService.recordAccess(tenantId);
+  },
+  onTenantNotFound: (req) => {
+    // Option 1: Observation only (return void → next() is called)
+    logger.warn({ path: req.path }, 'no tenant');
+
+    // Option 2: Block the request (throw an exception)
+    throw new ForbiddenException('Tenant header required');
+
+    // Option 3: Return 'skip' to prevent next() — you handle the response yourself
+    return 'skip';
+  },
 })
 ```
+
+| Hook | Signature | When |
+|------|-----------|------|
+| `onTenantResolved` | `(tenantId: string, req: Request) => void \| Promise<void>` | After successful extraction and validation |
+| `onTenantNotFound` | `(req: Request) => void \| 'skip' \| Promise<void \| 'skip'>` | When no tenant ID could be extracted |
 
 ## Error Responses
 

@@ -1,61 +1,52 @@
 # @nestarc/tenancy Roadmap
 
-> v0.1.0 배포 완료 (2026-03-23). 이 문서는 다음 단계를 정리합니다.
+> v0.2.0 구현 완료 (2026-03-24). 이 문서는 다음 단계를 정리합니다.
 
 ---
 
-## Phase 2: 실전 검증 + 차별화 (v0.2.0)
+## Phase 2: 실전 검증 + 차별화 (v0.2.0) ✅ 완료
 
 **목표**: "직접 구현해도 되지 않나?"에 대한 답을 만든다.
 
-### 2-1. 벤치마크 공개
+### 2-1. 벤치마크 공개 ✅
 
-| 항목 | 내용 |
-|------|------|
-| 측정 대상 | batch transaction 오버헤드 (확장 ON vs OFF) |
-| 환경 | PostgreSQL 16, Prisma 6, 1000 concurrent requests |
-| 예상 결과 | SELECT 기준 <1ms 추가 지연 |
-| 산출물 | `benchmarks/` 디렉토리 + README에 결과 표 |
+README에 PostgreSQL 16 + Prisma 6 기반 벤치마크 결과 공개 완료.
 
-사용자가 가장 먼저 의심하는 것은 성능이다. 수치로 증명한다.
+### 2-2. 다중 추출 전략 ✅
 
-### 2-2. 다중 추출 전략
-
-| 추출기 | 구현 | 사용 사례 |
+| 추출기 | 상태 | 사용 사례 |
 |--------|------|----------|
 | `HeaderTenantExtractor` | ✅ v0.1.0 | API 서버 |
-| `SubdomainTenantExtractor` | 신규 | SaaS (tenant1.app.com) |
-| `JwtClaimTenantExtractor` | 신규 | 인증 토큰 기반 |
-| `PathTenantExtractor` | 신규 | /api/tenants/:id/... |
-| `CompositeTenantExtractor` | 신규 | 여러 전략 폴백 체인 |
+| `SubdomainTenantExtractor` | ✅ v0.2.0 | SaaS (tenant1.app.com) |
+| `JwtClaimTenantExtractor` | ✅ v0.2.0 | 인증 토큰 기반 |
+| `PathTenantExtractor` | ✅ v0.2.0 | /api/tenants/:id/... |
+| `CompositeTenantExtractor` | ✅ v0.2.0 | 여러 전략 폴백 체인 |
 
-직접 구현하면 각각 20~30줄이지만, 테스트 + 엣지 케이스 처리까지 하면 번거롭다. 라이브러리의 가치가 여기서 나온다.
+### 2-3. Tenant Lifecycle Hooks ✅
 
-### 2-3. Tenant Lifecycle Hooks
+- `onTenantResolved(tenantId, req)` — AsyncLocalStorage 컨텍스트 내에서 실행
+- `onTenantNotFound(req)` — `void` 반환 시 관찰용, `'skip'` 반환 시 `next()` 차단, throw로 에러 처리
 
-```typescript
-TenancyModule.forRoot({
-  tenantExtractor: 'X-Tenant-Id',
-  onTenantResolved: (tenantId, req) => {
-    // 로깅, 감사, 사용량 추적
-  },
-  onTenantNotFound: (req) => {
-    // 커스텀 에러, 리다이렉트
-  },
-})
-```
+### 2-4. Prisma 확장 고도화 ✅
 
-미들웨어를 직접 확장하지 않아도 tenant 이벤트에 반응할 수 있다.
+- **autoInjectTenantId**: `create`, `createMany`, `createManyAndReturn`, `upsert`에 자동 주입
+- **sharedModels**: 지정된 모델은 RLS + 주입 모두 건너뜀
+- **tenantIdField**: 커스텀 컬럼명 지원
 
-### 2-4. Prisma 확장 고도화
+#### 알려진 제약
 
-- **Tenant-aware `create`/`update`**: `tenant_id` 자동 주입 옵션
-- **Read-only bypass**: 특정 모델은 RLS 없이 조회 (공유 테이블)
-- **`@BypassTenancy()` Prisma 레벨 지원**: 가드뿐 아니라 Prisma 쿼리에서도 bypass
+- Interactive transaction 내에서는 `set_config`가 별도 커넥션에서 실행됨 (JSDoc 문서화 완료)
+- `@BypassTenancy()` Prisma 레벨 지원은 v0.3.0으로 이월
 
 ---
 
 ## Phase 3: 생태계 확장 (v0.3.0)
+
+### 3-0. v0.2.0에서 이월된 항목
+
+- **`@BypassTenancy()` Prisma 레벨 지원**: 가드뿐 아니라 Prisma 쿼리에서도 bypass
+- **Subdomain ccTLD 대응**: `baseDomain` 옵션 추가 (`.co.uk` 등 multi-part TLD)
+- **Interactive transaction 지원**: 호출자 트랜잭션 컨텍스트에 `set_config` 전파
 
 ### 3-1. CLI 도구
 
@@ -125,10 +116,10 @@ Prisma 전용이라는 한계를 벗어나면 사용자 풀이 넓어진다.
 ## 우선순위 요약
 
 ```
-즉시 (v0.1.x)     벤치마크 공개
-1개월 (v0.2.0)     다중 추출 전략 + Lifecycle Hooks + Prisma 고도화
-3개월 (v0.3.0)     CLI + 다중 DB + ORM 어댑터
-6개월 (v1.0.0)     보안 강화 + 운영 도구 + 문서 사이트
+✅ v0.1.0 (완료)    코어 모듈 + 벤치마크 공개
+✅ v0.2.0 (완료)    다중 추출 전략 + Lifecycle Hooks + Prisma 고도화
+→ v0.3.0 (다음)    CLI + 다중 DB + ORM 어댑터 + v0.2.0 이월 항목
+  v1.0.0           보안 강화 + 운영 도구 + 문서 사이트
 ```
 
 **핵심 원칙**: 직접 구현하면 30분, 하지만 테스트 + 엣지 케이스 + 문서까지 하면 3일 걸리는 것들을 라이브러리가 해결해준다.
