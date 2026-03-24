@@ -17,4 +17,5 @@ export type { SubdomainExtractorOptions } from './extractors/subdomain.extractor
 export type { JwtClaimExtractorOptions } from './extractors/jwt-claim.extractor';
 export type { PathExtractorOptions } from './extractors/path.extractor';
 export { createPrismaTenancyExtension } from './prisma/prisma-tenancy.extension';
+export type { PrismaTenancyExtensionOptions } from './prisma/prisma-tenancy.extension';
 export { TENANCY_MODULE_OPTIONS } from './tenancy.constants';
