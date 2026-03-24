@@ -72,4 +72,87 @@ describe('TenantMiddleware', () => {
       done();
     });
   });
+
+  describe('Lifecycle Hooks', () => {
+    it('should call onTenantResolved after successful extraction', (done) => {
+      const onTenantResolved = jest.fn();
+      const mw = createMiddleware({ onTenantResolved });
+      const req = mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' });
+
+      mw.use(req, mockRes(), () => {
+        expect(onTenantResolved).toHaveBeenCalledWith(
+          '550e8400-e29b-41d4-a716-446655440000',
+          req,
+        );
+        done();
+      });
+    });
+
+    it('should call onTenantResolved inside context.run (getCurrentTenant available)', (done) => {
+      const onTenantResolved = jest.fn((tenantId: string) => {
+        expect(new TenancyContext().getTenantId()).toBe(tenantId);
+      });
+      const mw = createMiddleware({ onTenantResolved });
+
+      mw.use(
+        mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }),
+        mockRes(),
+        () => { done(); },
+      );
+    });
+
+    it('should call onTenantNotFound when no tenant header', (done) => {
+      const onTenantNotFound = jest.fn();
+      const mw = createMiddleware({ onTenantNotFound });
+      const req = mockReq();
+
+      mw.use(req, mockRes(), () => {
+        expect(onTenantNotFound).toHaveBeenCalledWith(req);
+        done();
+      });
+    });
+
+    it('should support async hooks', (done) => {
+      const onTenantResolved = jest.fn().mockResolvedValue(undefined);
+      const mw = createMiddleware({ onTenantResolved });
+
+      mw.use(
+        mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }),
+        mockRes(),
+        () => {
+          expect(onTenantResolved).toHaveBeenCalled();
+          done();
+        },
+      );
+    });
+
+    it('should propagate error from hook', async () => {
+      const mw = createMiddleware({
+        onTenantResolved: async () => { throw new Error('audit failed'); },
+      });
+
+      await expect(
+        new Promise((resolve, reject) => {
+          mw.use(
+            mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }),
+            mockRes(),
+            resolve,
+          ).catch(reject);
+        }),
+      ).rejects.toThrow('audit failed');
+    });
+
+    it('should not call onTenantResolved when validation fails', async () => {
+      const onTenantResolved = jest.fn();
+      const mw = createMiddleware({ onTenantResolved });
+
+      await expect(
+        new Promise((resolve, reject) => {
+          mw.use(mockReq({ 'x-tenant-id': 'invalid' }), mockRes(), resolve).catch(reject);
+        }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(onTenantResolved).not.toHaveBeenCalled();
+    });
+  });
 });

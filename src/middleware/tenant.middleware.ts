@@ -18,7 +18,7 @@ export class TenantMiddleware implements NestMiddleware {
 
   constructor(
     @Inject(TENANCY_MODULE_OPTIONS)
-    options: TenancyModuleOptions,
+    private readonly options: TenancyModuleOptions,
     private readonly context: TenancyContext,
   ) {
     this.extractor =
@@ -34,6 +34,7 @@ export class TenantMiddleware implements NestMiddleware {
     const tenantId = await this.extractor.extract(req);
 
     if (!tenantId) {
+      await this.options.onTenantNotFound?.(req);
       next();
       return;
     }
@@ -43,6 +44,9 @@ export class TenantMiddleware implements NestMiddleware {
       throw new BadRequestException('Invalid tenant ID format');
     }
 
-    this.context.run(tenantId, () => next());
+    await this.context.run(tenantId, async () => {
+      await this.options.onTenantResolved?.(tenantId, req);
+      next();
+    });
   }
 }
