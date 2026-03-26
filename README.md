@@ -306,12 +306,16 @@ CREATE POLICY admin_bypass ON users
 ```
 
 ```typescript
-// Inside an HTTP handler with @BypassTenancy()
-// The decorator bypasses the guard AND Prisma extension
+// @BypassTenancy() bypasses the GUARD only (no 403 error).
+// If a tenant header is present, Prisma still scopes to that tenant.
+// If no tenant header is present, Prisma skips set_config() entirely.
 @Get('/admin/users')
 @BypassTenancy()
 async getAllUsers() {
-  return this.prisma.user.findMany(); // Works without tenant header
+  // With X-Tenant-Id header: returns that tenant's data
+  // Without X-Tenant-Id header: returns 0 rows (RLS blocks)
+  // For true cross-tenant access, use withoutTenant() + admin connection
+  return this.prisma.user.findMany();
 }
 ```
 
@@ -361,7 +365,9 @@ TenancyModule.forRoot({
 >
 > NestJS execution order is: **Middleware → Guards → Interceptors → Pipes**. Since `TenantMiddleware` runs at the middleware stage, a NestJS Guard (e.g., `@nestjs/passport` `AuthGuard`) runs *after* the tenant is already resolved and cannot protect it.
 >
-> Verify the JWT in middleware, before the tenancy middleware:
+> **Middleware ordering:** `TenancyModule` registers `TenantMiddleware` globally via its own `configure()` call. To run JWT verification *before* tenant extraction, you have two options:
+>
+> **Option 1 — Apply auth middleware in the same `configure()` call, before `TenantMiddleware`:**
 >
 > ```typescript
 > // app.module.ts — register auth middleware before tenancy reads the token
@@ -377,6 +383,49 @@ TenancyModule.forRoot({
 >       .forRoutes('*');
 >   }
 > }
+> ```
+>
+> **Option 2 — Use a module imported before `AppModule` registers `TenancyModule`:**
+>
+> NestJS applies middleware in the order modules are initialized. If your auth middleware is registered in a module that is imported before `TenancyModule`, it will run first.
+>
+> ```typescript
+> // auth.module.ts — registers JWT verification middleware globally
+> @Module({})
+> export class AuthModule implements NestModule {
+>   configure(consumer: MiddlewareConsumer) {
+>     consumer
+>       .apply(JwtVerifyMiddleware) // verifies signature, populates req.user
+>       .forRoutes('*');
+>   }
+> }
+>
+> // app.module.ts — import AuthModule BEFORE TenancyModule
+> @Module({
+>   imports: [
+>     AuthModule,        // middleware runs first
+>     TenancyModule.forRoot({
+>       tenantExtractor: new JwtClaimTenantExtractor({ claimKey: 'org_id' }),
+>     }),
+>   ],
+> })
+> export class AppModule {}
+> ```
+>
+> **Option 3 — Verify the JWT claim in `onTenantResolved`:**
+>
+> If you need to ensure the resolved tenant matches the authenticated user, use the `onTenantResolved` hook. This does not replace signature verification but lets you add an authorization check after extraction:
+>
+> ```typescript
+> TenancyModule.forRoot({
+>   tenantExtractor: new JwtClaimTenantExtractor({ claimKey: 'org_id' }),
+>   onTenantResolved: (tenantId, req) => {
+>     // req.user is populated by an upstream auth middleware
+>     if (req.user?.org_id !== tenantId) {
+>       throw new ForbiddenException('Tenant mismatch');
+>     }
+>   },
+> })
 > ```
 
 #### Path Parameter
@@ -438,14 +487,15 @@ TenancyModule.forRoot({
     logger.info({ tenantId, path: req.path }, 'tenant resolved');
     await auditService.recordAccess(tenantId);
   },
-  onTenantNotFound: (req) => {
+  onTenantNotFound: (req, res) => {
     // Option 1: Observation only (return void → next() is called)
     logger.warn({ path: req.path }, 'no tenant');
 
     // Option 2: Block the request (throw an exception)
     throw new ForbiddenException('Tenant header required');
 
-    // Option 3: Return 'skip' to prevent next() — you handle the response yourself
+    // Option 3: Return 'skip' to prevent next() — use res to send your own response
+    res.status(401).json({ message: 'Tenant header required' });
     return 'skip';
   },
 })
@@ -454,7 +504,7 @@ TenancyModule.forRoot({
 | Hook | Signature | When |
 |------|-----------|------|
 | `onTenantResolved` | `(tenantId: string, req: Request) => void \| Promise<void>` | After successful extraction and validation |
-| `onTenantNotFound` | `(req: Request) => void \| 'skip' \| Promise<void \| 'skip'>` | When no tenant ID could be extracted |
+| `onTenantNotFound` | `(req: Request, res: Response) => void \| 'skip' \| Promise<void \| 'skip'>` | When no tenant ID could be extracted |
 
 ## Error Responses
 

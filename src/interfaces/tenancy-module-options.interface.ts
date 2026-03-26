@@ -1,6 +1,6 @@
 import { Type } from '@nestjs/common';
 import { ModuleMetadata } from '@nestjs/common/interfaces';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { TenantExtractor } from './tenant-extractor.interface';
 
 export interface TenancyModuleOptions {
@@ -20,7 +20,7 @@ export interface TenancyModuleOptions {
    * Throwing an exception (e.g., `throw new ForbiddenException()`) always aborts
    * the request regardless of return value.
    */
-  onTenantNotFound?: (request: Request) => void | 'skip' | Promise<void | 'skip'>;
+  onTenantNotFound?: (request: Request, response: Response) => void | 'skip' | Promise<void | 'skip'>;
 }
 
 export interface TenancyModuleOptionsFactory {

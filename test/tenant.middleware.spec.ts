@@ -105,9 +105,10 @@ describe('TenantMiddleware', () => {
       const onTenantNotFound = jest.fn();
       const mw = createMiddleware({ onTenantNotFound });
       const req = mockReq();
+      const res = mockRes();
 
-      mw.use(req, mockRes(), () => {
-        expect(onTenantNotFound).toHaveBeenCalledWith(req);
+      mw.use(req, res, () => {
+        expect(onTenantNotFound).toHaveBeenCalledWith(req, res);
         done();
       });
     });
@@ -146,10 +147,12 @@ describe('TenantMiddleware', () => {
       const onTenantNotFound = jest.fn().mockReturnValue('skip');
       const mw = createMiddleware({ onTenantNotFound });
       const next = jest.fn();
+      const req = mockReq();
+      const res = mockRes();
 
-      await mw.use(mockReq(), mockRes(), next);
+      await mw.use(req, res, next);
 
-      expect(onTenantNotFound).toHaveBeenCalled();
+      expect(onTenantNotFound).toHaveBeenCalledWith(req, res);
       expect(next).not.toHaveBeenCalled();
     });
 
@@ -157,19 +160,23 @@ describe('TenantMiddleware', () => {
       const onTenantNotFound = jest.fn().mockResolvedValue('skip');
       const mw = createMiddleware({ onTenantNotFound });
       const next = jest.fn();
+      const req = mockReq();
+      const res = mockRes();
 
-      await mw.use(mockReq(), mockRes(), next);
+      await mw.use(req, res, next);
 
-      expect(onTenantNotFound).toHaveBeenCalled();
+      expect(onTenantNotFound).toHaveBeenCalledWith(req, res);
       expect(next).not.toHaveBeenCalled();
     });
 
     it('should call next() when onTenantNotFound returns void', (done) => {
       const onTenantNotFound = jest.fn();  // returns undefined
       const mw = createMiddleware({ onTenantNotFound });
+      const req = mockReq();
+      const res = mockRes();
 
-      mw.use(mockReq(), mockRes(), () => {
-        expect(onTenantNotFound).toHaveBeenCalled();
+      mw.use(req, res, () => {
+        expect(onTenantNotFound).toHaveBeenCalledWith(req, res);
         done();
       });
     });
