@@ -145,19 +145,20 @@ describe('generateModuleSetup', () => {
       ...baseOptions,
       extractorType: 'Path Parameter',
     });
-    expect(result).toContain("new PathTenantExtractor({ pattern: '/api/tenants/:tenantId' })");
+    expect(result).toContain("new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' })");
     expect(result).toContain('PathTenantExtractor');
     expect(result).toContain("import { TenancyModule, PathTenantExtractor } from '@nestarc/tenancy';");
   });
 
-  it('should use Composite placeholder for Composite type', () => {
+  it('should use Composite scaffold for Composite type', () => {
     const result = generateModuleSetup({
       ...baseOptions,
       extractorType: 'Composite',
     });
-    expect(result).toContain('/* configure your CompositeExtractor here */');
-    // Composite is not in extractorImportMap so no extra import
-    expect(result).toContain("import { TenancyModule } from '@nestarc/tenancy';");
+    expect(result).toContain('new CompositeTenantExtractor([');
+    expect(result).toContain("new HeaderTenantExtractor('X-Tenant-Id'),");
+    expect(result).toContain('// Add more extractors here');
+    expect(result).toContain("import { TenancyModule, CompositeTenantExtractor, HeaderTenantExtractor } from '@nestarc/tenancy';");
   });
 
   it('should fall through to default (header string) for unknown extractor type', () => {

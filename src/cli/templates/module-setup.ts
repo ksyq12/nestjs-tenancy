@@ -28,6 +28,12 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
   if (extractorClass) {
     namedImports.push(extractorClass);
   }
+  if (options.extractorType === 'Composite') {
+    if (!namedImports.includes('CompositeTenantExtractor')) {
+      namedImports.push('CompositeTenantExtractor');
+      namedImports.push('HeaderTenantExtractor');
+    }
+  }
   if (usePrismaExtension) {
     namedImports.push('createPrismaTenancyExtension');
   }
@@ -41,17 +47,22 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
       lines.push('  tenantExtractor: new SubdomainTenantExtractor(),');
       break;
     case 'JWT Claim':
+      lines.push("  // WARNING: JWT signature must be verified BEFORE tenancy middleware.");
+      lines.push("  // Add express-jwt or similar middleware BEFORE TenancyModule.");
       lines.push(
         "  tenantExtractor: new JwtClaimTenantExtractor({ claimKey: 'tenant_id' }),",
       );
       break;
     case 'Path Parameter':
       lines.push(
-        "  tenantExtractor: new PathTenantExtractor({ pattern: '/api/tenants/:tenantId' }),",
+        "  tenantExtractor: new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' }),",
       );
       break;
     case 'Composite':
-      lines.push('  tenantExtractor: /* configure your CompositeExtractor here */,');
+      lines.push("  tenantExtractor: new CompositeTenantExtractor([");
+      lines.push("    new HeaderTenantExtractor('X-Tenant-Id'),");
+      lines.push("    // Add more extractors here");
+      lines.push("  ]),");
       break;
     default:
       lines.push("  tenantExtractor: 'X-Tenant-Id',");
@@ -74,6 +85,9 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
       lines.push(
         `  sharedModels: [${options.sharedModels.map((m) => `'${m}'`).join(', ')}],`,
       );
+    }
+    if (options.dbSettingKey !== 'app.current_tenant') {
+      lines.push(`  dbSettingKey: '${options.dbSettingKey}',`);
     }
     lines.push('})');
   }

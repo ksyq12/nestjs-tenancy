@@ -33,15 +33,34 @@ export class SubdomainTenantExtractor implements TenantExtractor {
 
   extract(request: Request): string | null {
     const hostname = request.hostname;
-    const parsed = this.psl.parse(hostname);
 
-    if ('error' in parsed || !('subdomain' in parsed) || !parsed.subdomain || !parsed.listed) {
+    // Reject IP addresses — psl treats octets as domain segments
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
       return null;
     }
 
-    const parts = parsed.subdomain.split('.');
-    const subdomain = parts[0].toLowerCase();
+    const parsed = this.psl.parse(hostname);
 
+    if ('error' in parsed) {
+      return null;
+    }
+
+    let subdomain: string | null = null;
+
+    if ('subdomain' in parsed && parsed.subdomain) {
+      // psl successfully parsed a known TLD — use its subdomain
+      subdomain = parsed.subdomain.split('.')[0].toLowerCase();
+    } else if (!parsed.listed) {
+      // Internal/private domain (e.g. .local, .internal) — psl cannot parse it.
+      // Fall back to simple split: treat the first segment as subdomain if there
+      // are at least 3 labels (subdomain.domain.tld).
+      const labels = hostname.split('.');
+      if (labels.length >= 3) {
+        subdomain = labels[0].toLowerCase();
+      }
+    }
+
+    if (!subdomain) return null;
     if (this.excludes.has(subdomain)) return null;
     return subdomain;
   }

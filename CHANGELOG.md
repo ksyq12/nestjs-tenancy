@@ -17,7 +17,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `SubdomainTenantExtractor` now requires the `psl` package (optional dependency)
+- `SubdomainTenantExtractor` now requires the `psl` package as a dependency
 
 ### Migration Guide
 

@@ -74,6 +74,14 @@ CREATE POLICY tenant_isolation ON users
 -- Repeat for each tenant-scoped table
 ```
 
+> **Critical:** RLS only applies to non-superuser roles. Create a dedicated application role:
+> ```sql
+> CREATE ROLE app_user LOGIN PASSWORD 'your_password';
+> GRANT USAGE ON SCHEMA public TO app_user;
+> GRANT SELECT, INSERT, UPDATE, DELETE ON your_table TO app_user;
+> ```
+> Use this role's connection string in your application. If you connect as a superuser, RLS policies are silently bypassed.
+
 ### 2. Register the module
 
 ```typescript
@@ -130,6 +138,8 @@ createPrismaTenancyExtension(tenancyService, {
 | `autoInjectTenantId` | `boolean` | `false` | Auto-inject tenant ID into `create`, `createMany`, `createManyAndReturn`, `upsert` |
 | `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
+
+> **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
 
 > **Note:** When using interactive transactions (`$transaction(async (tx) => ...)`), the `set_config` call runs in a separate connection. Call `set_config` manually as the first statement inside interactive transactions.
 

@@ -72,4 +72,11 @@ describe('SubdomainTenantExtractor', () => {
     const req = { hostname: 'tenant1.example.com.au' } as any;
     expect(extractor.extract(req)).toBe('tenant1');
   });
+
+  it('should extract subdomain from internal domain', () => {
+    const extractor = new SubdomainTenantExtractor();
+    const req = { hostname: 'tenant1.example.local' } as any;
+    // Internal domains should work even if not in public suffix list
+    expect(extractor.extract(req)).toBe('tenant1');
+  });
 });
