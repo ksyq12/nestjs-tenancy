@@ -16,6 +16,12 @@ describe('generateSetupSql', () => {
     expect(sql).toContain('GRANT USAGE ON SCHEMA public TO app_user;');
   });
 
+  it('should include tenant_id warning comment in header', () => {
+    const sql = generateSetupSql(baseOptions);
+    expect(sql).toContain("-- IMPORTANT: This script assumes all non-shared models have a 'tenant_id' column.");
+    expect(sql).toContain("-- Remove or modify policies for models that don't use tenant isolation.");
+  });
+
   it('should include general sequence grant at the end', () => {
     const sql = generateSetupSql(baseOptions);
     expect(sql).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;');
@@ -86,7 +92,7 @@ describe('generateSetupSql', () => {
     const sql = generateSetupSql(baseOptions);
     expect(sql).toBeTruthy();
     expect(sql).not.toContain('ENABLE ROW LEVEL SECURITY');
-    expect(sql).not.toContain('shared model');
+    expect(sql).not.toContain('(shared model)');
   });
 
   it('should use custom tenantIdField in policy', () => {
@@ -97,6 +103,19 @@ describe('generateSetupSql', () => {
     };
     const sql = generateSetupSql(options);
     expect(sql).toContain('org_id = current_setting');
+  });
+
+  it('should sanitize hyphenated table names in policy identifiers', () => {
+    const options = {
+      ...baseOptions,
+      models: [{ modelName: 'AuditLog', tableName: 'audit-logs' }],
+    };
+    const sql = generateSetupSql(options);
+    expect(sql).toContain('ALTER TABLE "audit-logs" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('CREATE POLICY tenant_isolation_audit_logs ON "audit-logs"');
+    expect(sql).toContain('CREATE POLICY tenant_insert_audit_logs ON "audit-logs"');
+    expect(sql).not.toContain('tenant_isolation_audit-logs');
+    expect(sql).not.toContain('tenant_insert_audit-logs');
   });
 });
 
@@ -216,5 +235,32 @@ describe('generateModuleSetup', () => {
   it('should NOT include createPrismaTenancyExtension block when neither flag is set', () => {
     const result = generateModuleSetup(baseOptions);
     expect(result).not.toContain('createPrismaTenancyExtension');
+  });
+
+  it('should include validateTenantId when tenantFormat is Custom and customRegex is provided', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      tenantFormat: 'Custom',
+      customRegex: '^[a-z0-9-]+$',
+    });
+    expect(result).toContain("validateTenantId: (id) => /^[a-z0-9-]+$/.test(id),");
+  });
+
+  it('should NOT include validateTenantId when tenantFormat is UUID', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      tenantFormat: 'UUID',
+      customRegex: '^[a-z0-9-]+$',
+    });
+    expect(result).not.toContain('validateTenantId');
+  });
+
+  it('should NOT include validateTenantId when tenantFormat is Custom but customRegex is empty', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      tenantFormat: 'Custom',
+      customRegex: '',
+    });
+    expect(result).not.toContain('validateTenantId');
   });
 });

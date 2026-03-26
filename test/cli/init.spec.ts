@@ -201,6 +201,30 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
+  it('should include validateTenantId in module setup when tenantFormat is Custom', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      'model User {\n  id Int @id\n}\n',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'Custom',
+      customRegex: '^[a-z0-9-]+$',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    await runInit({ cwd: tmpDir });
+
+    const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
+    expect(fs.existsSync(modulePath)).toBe(true);
+    const content = fs.readFileSync(modulePath, 'utf-8');
+    expect(content).toContain("validateTenantId: (id) => /^[a-z0-9-]+$/.test(id),");
+  });
+
   it('should return early when user cancels (no extractor in response)', async () => {
     const prompts = require('prompts') as jest.Mock;
     // prompts returns an empty object (user hit Ctrl+C / cancelled)

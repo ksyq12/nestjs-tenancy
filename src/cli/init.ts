@@ -56,6 +56,12 @@ export async function runInit(options?: InitOptions): Promise<void> {
     },
     {
       type: 'text',
+      name: 'customRegex',
+      message: 'Custom tenant ID regex (e.g., ^[a-z0-9-]+$)',
+      initial: '^[a-z0-9-]+$',
+    },
+    {
+      type: 'text',
       name: 'dbSettingKey',
       message: 'Database setting key',
       initial: 'app.current_tenant',
@@ -92,6 +98,8 @@ export async function runInit(options?: InitOptions): Promise<void> {
     dbSettingKey: response.dbSettingKey,
     autoInjectTenantId: response.autoInject,
     sharedModels,
+    tenantFormat: response.tenantFormat,
+    customRegex: response.customRegex,
   });
 
   await writeFileWithConfirm(prompts, path.join(cwd, 'tenancy-setup.sql'), sql);

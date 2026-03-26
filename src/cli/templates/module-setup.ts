@@ -3,6 +3,8 @@ export interface ModuleSetupOptions {
   dbSettingKey: string;
   autoInjectTenantId: boolean;
   sharedModels: string[];
+  tenantFormat?: string;
+  customRegex?: string;
 }
 
 export function generateModuleSetup(options: ModuleSetupOptions): string {
@@ -66,6 +68,10 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
       break;
     default:
       lines.push("  tenantExtractor: 'X-Tenant-Id',");
+  }
+
+  if (options.tenantFormat === 'Custom' && options.customRegex) {
+    lines.push(`  validateTenantId: (id) => /${options.customRegex}/.test(id),`);
   }
 
   if (options.dbSettingKey !== 'app.current_tenant') {
