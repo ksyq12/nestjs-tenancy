@@ -24,6 +24,7 @@ export function generateSetupSql(options: SetupSqlOptions): string {
     'END',
     '$$;',
     '',
+    '-- GRANT CONNECT ON DATABASE your_database TO app_user;',
     'GRANT USAGE ON SCHEMA public TO app_user;',
     '',
   ];
@@ -34,6 +35,8 @@ export function generateSetupSql(options: SetupSqlOptions): string {
       lines.push(
         `GRANT SELECT, INSERT, UPDATE, DELETE ON "${model.tableName}" TO app_user;`,
       );
+      lines.push('-- Also grant sequence permissions if using SERIAL/autoincrement columns:');
+      lines.push(`-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;`);
       lines.push('');
       continue;
     }
@@ -55,8 +58,14 @@ export function generateSetupSql(options: SetupSqlOptions): string {
     lines.push(
       `GRANT SELECT, INSERT, UPDATE, DELETE ON "${model.tableName}" TO app_user;`,
     );
+    lines.push('-- Also grant sequence permissions if using SERIAL/autoincrement columns:');
+    lines.push(`-- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;`);
     lines.push('');
   }
+
+  // General sequence grant for all sequences in the schema
+  lines.push('-- Grant sequence permissions for all sequences (SERIAL/autoincrement columns):');
+  lines.push('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;');
 
   return lines.join('\n');
 }

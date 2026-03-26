@@ -317,6 +317,33 @@ describe('createPrismaTenancyExtension', () => {
       });
     });
 
+    it('should not throw when createMany data is not an array (single object)', async () => {
+      const { mockPrisma, mockTransaction } = buildMockPrisma();
+      mockTransaction.mockResolvedValue([1, { count: 1 }]);
+
+      const handler = getHandlerWithAutoInject(mockPrisma);
+      const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ count: 1 }));
+
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-id', async () => {
+          try {
+            await handler({
+              model: 'Order',
+              operation: 'createMany',
+              args: { data: { name: 'A' } }, // single object, not array
+              query: mockQuery,
+            });
+
+            // Should pass through without mutation when data is not an array
+            expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'A' } });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      });
+    });
+
     it('should inject tenant_id on createManyAndReturn', async () => {
       const { mockPrisma, mockTransaction } = buildMockPrisma();
       mockTransaction.mockResolvedValue([1, [{ id: 1 }, { id: 2 }]]);

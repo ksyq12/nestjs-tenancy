@@ -94,10 +94,12 @@ export function createPrismaTenancyExtension(
                   break;
                 case 'createMany':
                 case 'createManyAndReturn':
-                  args = {
-                    ...args,
-                    data: args.data.map((d: any) => ({ ...d, [tenantIdField]: tenantId })),
-                  };
+                  if (Array.isArray(args.data)) {
+                    args = {
+                      ...args,
+                      data: args.data.map((d: any) => ({ ...d, [tenantIdField]: tenantId })),
+                    };
+                  }
                   break;
                 case 'upsert':
                   args = {

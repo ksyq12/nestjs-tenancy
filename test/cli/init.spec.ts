@@ -86,6 +86,78 @@ describe('CLI init', () => {
     expect(sql).not.toContain('"User"');
   });
 
+  it('should generate proper imports for non-Header extractor (Subdomain)', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Subdomain (tenant1.app.com)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    await runInit({ cwd: tmpDir });
+
+    const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
+    expect(fs.existsSync(modulePath)).toBe(true);
+    const content = fs.readFileSync(modulePath, 'utf-8');
+    expect(content).toContain('SubdomainTenantExtractor');
+    expect(content).toContain("import { TenancyModule, SubdomainTenantExtractor } from '@nestarc/tenancy'");
+    expect(content).toContain('new SubdomainTenantExtractor()');
+  });
+
+  it('should generate proper imports for JWT Claim extractor', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'JWT Claim',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    await runInit({ cwd: tmpDir });
+
+    const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
+    const content = fs.readFileSync(modulePath, 'utf-8');
+    expect(content).toContain('JwtClaimTenantExtractor');
+    expect(content).toContain("import { TenancyModule, JwtClaimTenantExtractor } from '@nestarc/tenancy'");
+  });
+
+  it('should include createPrismaTenancyExtension import when autoInject is true', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Subdomain (tenant1.app.com)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: true,
+      sharedModels: '',
+    });
+
+    await runInit({ cwd: tmpDir });
+
+    const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
+    const content = fs.readFileSync(modulePath, 'utf-8');
+    expect(content).toContain('createPrismaTenancyExtension');
+    expect(content).toContain('SubdomainTenantExtractor');
+    expect(content).toContain("import { TenancyModule, SubdomainTenantExtractor, createPrismaTenancyExtension } from '@nestarc/tenancy'");
+  });
+
   it('should not overwrite without confirmation', async () => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
