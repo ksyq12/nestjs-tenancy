@@ -262,16 +262,42 @@ export class HealthController {
 
 ### Programmatic Bypass
 
-Use `withoutTenant()` for background jobs, admin dashboards, or any code that needs to query across all tenants:
+Use `withoutTenant()` to clear the tenant context so the Prisma extension skips `set_config()`. With RLS enabled, this means queries return **0 rows** — RLS blocks access when no tenant session variable is set.
 
 ```typescript
-// Background job — no HTTP request context
-const allUsers = await tenancyService.withoutTenant(async () => {
-  return prisma.user.findMany(); // Returns ALL tenants' data
+// Background job — clears tenant context, Prisma extension skips set_config()
+// With RLS enabled, queries return 0 rows (RLS blocks access when no tenant is set)
+const result = await tenancyService.withoutTenant(async () => {
+  return prisma.user.findMany(); // Returns 0 rows when RLS is active
 });
+```
 
+`withoutTenant()` is primarily useful for:
+- **Shared tables** (models listed in `sharedModels`) — RLS is not applied, so all rows are returned
+- **Tenant lookup during login** — e.g., looking up a tenant record before the tenant context is established
+- **Code that uses a separate admin connection** — see below
+
+To actually query across all tenants, you need one of:
+
+1. **A superuser/RLS-exempt database connection** — use a separate `PrismaClient` with admin credentials that bypasses RLS:
+
+```typescript
+// adminPrisma uses a superuser connection — not subject to RLS
+const allUsers = await tenancyService.withoutTenant(async () => {
+  return adminPrisma.user.findMany(); // Returns ALL tenants' data
+});
+```
+
+2. **A PostgreSQL bypass policy** — add a policy that allows access when a bypass flag is set:
+
+```sql
+CREATE POLICY admin_bypass ON users
+  USING (current_setting('app.bypass_rls', true) = 'on');
+```
+
+```typescript
 // Inside an HTTP handler with @BypassTenancy()
-// The decorator already bypasses both the guard AND Prisma extension
+// The decorator bypasses the guard AND Prisma extension
 @Get('/admin/users')
 @BypassTenancy()
 async getAllUsers() {
@@ -321,7 +347,27 @@ TenancyModule.forRoot({
 // Authorization: Bearer eyJ... → payload.org_id
 ```
 
-> **Security:** This extractor does **not** verify the JWT signature. Ensure an authentication guard (e.g., `@nestjs/passport`) runs before the tenancy middleware.
+> **Security:** This extractor does **not** verify the JWT signature. You must ensure JWT signature verification happens at the **middleware level** — not in a NestJS Guard.
+>
+> NestJS execution order is: **Middleware → Guards → Interceptors → Pipes**. Since `TenantMiddleware` runs at the middleware stage, a NestJS Guard (e.g., `@nestjs/passport` `AuthGuard`) runs *after* the tenant is already resolved and cannot protect it.
+>
+> Verify the JWT in middleware, before the tenancy middleware:
+>
+> ```typescript
+> // app.module.ts — register auth middleware before tenancy reads the token
+> import { expressjwt } from 'express-jwt';
+>
+> export class AppModule implements NestModule {
+>   configure(consumer: MiddlewareConsumer) {
+>     consumer
+>       .apply(
+>         expressjwt({ secret: process.env.JWT_SECRET, algorithms: ['RS256'] }),
+>         TenantMiddleware, // runs after JWT is verified and req.auth is populated
+>       )
+>       .forRoutes('*');
+>   }
+> }
+> ```
 
 #### Path Parameter
 
@@ -413,6 +459,18 @@ TenancyModule.forRoot({
 - **SQL Injection**: The Prisma extension uses `set_config()` with bind parameters via `$executeRaw` tagged template. This eliminates SQL injection risk at the database layer. Additionally, tenant IDs are validated by the middleware (UUID format by default).
 - **Transaction-scoped**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL` — scoped to the batch transaction. No cross-request leakage via connection pool.
 - **Custom validators**: If your tenant IDs are not UUIDs, provide a `validateTenantId` function that rejects any unsafe input.
+
+### Security Considerations
+
+**Tenant ID is client-supplied by default.** The built-in extractors (Header, Subdomain, Path) read tenant identifiers directly from the request without verifying the caller's authorization to access that tenant.
+
+For production use, you **must** add a trust boundary — verify that the authenticated user belongs to the claimed tenant. Options:
+
+1. **Use `JwtClaimTenantExtractor`** with a pre-validated JWT (tenant ID embedded by your auth server)
+2. **Add validation in `onTenantResolved` hook** — check the user's tenant membership
+3. **Use authentication middleware** before the tenancy middleware to establish trust
+
+Without a trust boundary, any client can access any tenant's data by changing the header value.
 
 ## How It Works
 
