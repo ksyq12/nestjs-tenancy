@@ -16,7 +16,8 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
   };
   const extractorClass = extractorImportMap[options.extractorType];
 
-  const usePrismaExtension =
+  // Prisma extension is always needed for RLS — set_config() must run before every query
+  const hasExtensionOptions =
     options.autoInjectTenantId || options.sharedModels.length > 0;
 
   const lines: string[] = [
@@ -36,9 +37,7 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
       namedImports.push('HeaderTenantExtractor');
     }
   }
-  if (usePrismaExtension) {
-    namedImports.push('createPrismaTenancyExtension');
-  }
+  namedImports.push('createPrismaTenancyExtension');
   lines.push(`import { ${namedImports.join(', ')} } from '@nestarc/tenancy';`);
   lines.push('');
 
@@ -80,23 +79,27 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
 
   lines.push('})');
 
-  if (usePrismaExtension) {
-    lines.push('');
-    lines.push('// Prisma extension options:');
-    lines.push('createPrismaTenancyExtension(tenancyService, {');
+  lines.push('');
+  lines.push('// Prisma extension — required for RLS to work:');
+  lines.push('// const prisma = new PrismaClient().$extends(');
+  if (hasExtensionOptions) {
+    lines.push('//   createPrismaTenancyExtension(tenancyService, {');
     if (options.autoInjectTenantId) {
-      lines.push('  autoInjectTenantId: true,');
+      lines.push('//     autoInjectTenantId: true,');
     }
     if (options.sharedModels.length > 0) {
       lines.push(
-        `  sharedModels: [${options.sharedModels.map((m) => `'${m}'`).join(', ')}],`,
+        `//     sharedModels: [${options.sharedModels.map((m) => `'${m}'`).join(', ')}],`,
       );
     }
     if (options.dbSettingKey !== 'app.current_tenant') {
-      lines.push(`  dbSettingKey: '${options.dbSettingKey}',`);
+      lines.push(`//     dbSettingKey: '${options.dbSettingKey}',`);
     }
-    lines.push('})');
+    lines.push('//   })');
+  } else {
+    lines.push('//   createPrismaTenancyExtension(tenancyService)');
   }
+  lines.push('// );');
 
   return lines.join('\n');
 }

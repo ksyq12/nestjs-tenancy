@@ -107,7 +107,7 @@ describe('CLI init', () => {
     expect(fs.existsSync(modulePath)).toBe(true);
     const content = fs.readFileSync(modulePath, 'utf-8');
     expect(content).toContain('SubdomainTenantExtractor');
-    expect(content).toContain("import { TenancyModule, SubdomainTenantExtractor } from '@nestarc/tenancy'");
+    expect(content).toContain('SubdomainTenantExtractor, createPrismaTenancyExtension');
     expect(content).toContain('new SubdomainTenantExtractor()');
   });
 
@@ -131,7 +131,7 @@ describe('CLI init', () => {
     const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
     const content = fs.readFileSync(modulePath, 'utf-8');
     expect(content).toContain('JwtClaimTenantExtractor');
-    expect(content).toContain("import { TenancyModule, JwtClaimTenantExtractor } from '@nestarc/tenancy'");
+    expect(content).toContain('JwtClaimTenantExtractor, createPrismaTenancyExtension');
   });
 
   it('should include createPrismaTenancyExtension import when autoInject is true', async () => {

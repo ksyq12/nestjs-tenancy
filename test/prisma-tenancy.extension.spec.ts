@@ -318,7 +318,7 @@ describe('createPrismaTenancyExtension', () => {
       });
     });
 
-    it('should not throw when createMany data is not an array (single object)', async () => {
+    it('should inject tenant_id when createMany data is a single object', async () => {
       const { mockPrisma, mockTransaction } = buildMockPrisma();
       mockTransaction.mockResolvedValue([1, { count: 1 }]);
 
@@ -335,8 +335,7 @@ describe('createPrismaTenancyExtension', () => {
               query: mockQuery,
             });
 
-            // Should pass through without mutation when data is not an array
-            expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'A' } });
+            expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'A', tenant_id: 'tenant-id' } });
             resolve();
           } catch (e) {
             reject(e);

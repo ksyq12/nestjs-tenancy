@@ -117,6 +117,8 @@ export function createPrismaTenancyExtension(
                       ...args,
                       data: args.data.map((d: any) => ({ ...d, [tenantIdField]: tenantId })),
                     };
+                  } else if (args.data && typeof args.data === 'object') {
+                    args = { ...args, data: { ...args.data, [tenantIdField]: tenantId } };
                   }
                   break;
                 case 'upsert':

@@ -20,7 +20,7 @@ One line of code. Automatic tenant isolation.
 - **Shared models** — Whitelist models that skip RLS (e.g., `Country`, `Currency`)
 - **`withoutTenant()`** — programmatic bypass for background jobs and admin queries
 - **`tenancyTransaction()`** — interactive transaction support with RLS
-- **Fail-Closed mode** — `failClosed: true` blocks queries without tenant context, preventing accidental data exposure
+- **Fail-Closed mode** — `failClosed: true` blocks model queries without tenant context, preventing accidental data exposure
 - **Testing utilities** — `TestTenancyModule`, `withTenant()`, `expectTenantIsolation()` via `@nestarc/tenancy/testing`
 - **Event system** — optional `@nestjs/event-emitter` integration for `tenant.resolved`, `tenant.not_found`, etc.
 - **CLI scaffolding** — `npx @nestarc/tenancy init` generates RLS policies and module config
@@ -370,25 +370,7 @@ TenancyModule.forRoot({
 >
 > **Middleware ordering:** `TenancyModule` registers `TenantMiddleware` globally via its own `configure()` call. To run JWT verification *before* tenant extraction, you have two options:
 >
-> **Option 1 — Apply auth middleware in the same `configure()` call, before `TenantMiddleware`:**
->
-> ```typescript
-> // app.module.ts — register auth middleware before tenancy reads the token
-> import { expressjwt } from 'express-jwt';
->
-> export class AppModule implements NestModule {
->   configure(consumer: MiddlewareConsumer) {
->     consumer
->       .apply(
->         expressjwt({ secret: process.env.JWT_SECRET, algorithms: ['RS256'] }),
->         TenantMiddleware, // runs after JWT is verified and req.auth is populated
->       )
->       .forRoutes('*');
->   }
-> }
-> ```
->
-> **Option 2 — Use a module imported before `AppModule` registers `TenancyModule`:**
+> **Option 1 (recommended) — Import an auth module before TenancyModule:**
 >
 > NestJS applies middleware in the order modules are initialized. If your auth middleware is registered in a module that is imported before `TenancyModule`, it will run first.
 >
@@ -519,7 +501,7 @@ TenancyModule.forRoot({
 
 ## Fail-Closed Mode
 
-By default, queries without a tenant context pass through silently. Enable `failClosed` to block them:
+By default, model queries without a tenant context pass through silently. Enable `failClosed` to block them:
 
 ```typescript
 const prisma = new PrismaClient().$extends(
@@ -532,6 +514,8 @@ const prisma = new PrismaClient().$extends(
 Queries are still allowed when:
 - The model is listed in `sharedModels`
 - `withoutTenant()` is used (explicit bypass)
+
+> **Scope**: `failClosed` applies to Prisma **model operations** (`findMany`, `create`, `update`, etc.). Raw queries (`$queryRaw`, `$executeRaw`) bypass the extension and are **not** covered — use parameterized `set_config()` manually for raw queries.
 
 ## Testing Utilities
 

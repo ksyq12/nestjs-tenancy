@@ -35,19 +35,22 @@ export async function expectTenantIsolation(
     withTenant(tenantB, () => prismaModel.findMany()),
   ]);
 
-  const leakAtoB = rowsA.filter((r: any) => r[field] === tenantB);
-  const leakBtoA = rowsB.filter((r: any) => r[field] === tenantA);
+  // Verify all rows belong to the querying tenant (catches third-party leaks too)
+  const foreignInA = rowsA.filter((r: any) => r[field] !== tenantA);
+  const foreignInB = rowsB.filter((r: any) => r[field] !== tenantB);
 
-  if (leakAtoB.length > 0) {
+  if (foreignInA.length > 0) {
+    const foreignIds = [...new Set(foreignInA.map((r: any) => r[field]))];
     throw new Error(
       `Tenant isolation violation: tenant ${tenantA} query returned ` +
-      `${leakAtoB.length} row(s) belonging to tenant ${tenantB}`,
+      `${foreignInA.length} row(s) belonging to other tenant(s): ${foreignIds.join(', ')}`,
     );
   }
-  if (leakBtoA.length > 0) {
+  if (foreignInB.length > 0) {
+    const foreignIds = [...new Set(foreignInB.map((r: any) => r[field]))];
     throw new Error(
       `Tenant isolation violation: tenant ${tenantB} query returned ` +
-      `${leakBtoA.length} row(s) belonging to tenant ${tenantA}`,
+      `${foreignInB.length} row(s) belonging to other tenant(s): ${foreignIds.join(', ')}`,
     );
   }
 }

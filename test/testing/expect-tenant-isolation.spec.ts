@@ -60,6 +60,20 @@ describe('expectTenantIsolation', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('should throw when a third-party tenant leaks into results', async () => {
+    const model = createMockModel({
+      'tenant-a': [
+        { id: 1, tenant_id: 'tenant-a' },
+        { id: 99, tenant_id: 'tenant-c' }, // third-party leak!
+      ],
+      'tenant-b': [{ id: 2, tenant_id: 'tenant-b' }],
+    });
+
+    await expect(
+      expectTenantIsolation(model, 'tenant-a', 'tenant-b'),
+    ).rejects.toThrow('tenant-c');
+  });
+
   it('should support custom tenantIdField', async () => {
     const model = createMockModel({
       'tenant-a': [{ id: 1, org_id: 'tenant-a' }],

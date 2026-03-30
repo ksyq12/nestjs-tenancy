@@ -136,7 +136,7 @@ describe('generateModuleSetup', () => {
   it('should use Header extractor (default) when type is Header (X-Tenant-Id)', () => {
     const result = generateModuleSetup(baseOptions);
     expect(result).toContain("tenantExtractor: 'X-Tenant-Id',");
-    expect(result).toContain("import { TenancyModule } from '@nestarc/tenancy';");
+    expect(result).toContain("import { TenancyModule, createPrismaTenancyExtension } from '@nestarc/tenancy';");
   });
 
   it('should use SubdomainTenantExtractor for Subdomain type', () => {
@@ -146,7 +146,8 @@ describe('generateModuleSetup', () => {
     });
     expect(result).toContain('new SubdomainTenantExtractor()');
     expect(result).toContain('SubdomainTenantExtractor');
-    expect(result).toContain("import { TenancyModule, SubdomainTenantExtractor } from '@nestarc/tenancy';");
+    expect(result).toContain('SubdomainTenantExtractor');
+    expect(result).toContain('createPrismaTenancyExtension');
   });
 
   it('should use JwtClaimTenantExtractor for JWT Claim type', () => {
@@ -156,7 +157,8 @@ describe('generateModuleSetup', () => {
     });
     expect(result).toContain("new JwtClaimTenantExtractor({ claimKey: 'tenant_id' })");
     expect(result).toContain('JwtClaimTenantExtractor');
-    expect(result).toContain("import { TenancyModule, JwtClaimTenantExtractor } from '@nestarc/tenancy';");
+    expect(result).toContain('JwtClaimTenantExtractor');
+    expect(result).toContain('createPrismaTenancyExtension');
   });
 
   it('should use PathTenantExtractor for Path Parameter type', () => {
@@ -166,7 +168,8 @@ describe('generateModuleSetup', () => {
     });
     expect(result).toContain("new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' })");
     expect(result).toContain('PathTenantExtractor');
-    expect(result).toContain("import { TenancyModule, PathTenantExtractor } from '@nestarc/tenancy';");
+    expect(result).toContain('PathTenantExtractor');
+    expect(result).toContain('createPrismaTenancyExtension');
   });
 
   it('should use Composite scaffold for Composite type', () => {
@@ -177,7 +180,9 @@ describe('generateModuleSetup', () => {
     expect(result).toContain('new CompositeTenantExtractor([');
     expect(result).toContain("new HeaderTenantExtractor('X-Tenant-Id'),");
     expect(result).toContain('// Add more extractors here');
-    expect(result).toContain("import { TenancyModule, CompositeTenantExtractor, HeaderTenantExtractor } from '@nestarc/tenancy';");
+    expect(result).toContain('CompositeTenantExtractor');
+    expect(result).toContain('HeaderTenantExtractor');
+    expect(result).toContain('createPrismaTenancyExtension');
   });
 
   it('should fall through to default (header string) for unknown extractor type', () => {
@@ -201,25 +206,27 @@ describe('generateModuleSetup', () => {
     expect(result).toContain("dbSettingKey: 'app.tenant',");
   });
 
-  it('should include createPrismaTenancyExtension block when autoInjectTenantId is true', () => {
+  it('should always include Prisma extension block', () => {
+    const result = generateModuleSetup(baseOptions);
+    expect(result).toContain('createPrismaTenancyExtension(tenancyService)');
+    expect(result).toContain('// Prisma extension — required for RLS to work:');
+  });
+
+  it('should include options in extension block when autoInjectTenantId is true', () => {
     const result = generateModuleSetup({
       ...baseOptions,
       autoInjectTenantId: true,
     });
     expect(result).toContain('createPrismaTenancyExtension(tenancyService, {');
     expect(result).toContain('autoInjectTenantId: true,');
-    expect(result).toContain('createPrismaTenancyExtension');
-    expect(result).toContain("import { TenancyModule, createPrismaTenancyExtension } from '@nestarc/tenancy';");
   });
 
-  it('should include sharedModels in createPrismaTenancyExtension block when provided', () => {
+  it('should include sharedModels in extension block when provided', () => {
     const result = generateModuleSetup({
       ...baseOptions,
       sharedModels: ['Country', 'Currency'],
     });
     expect(result).toContain("sharedModels: ['Country', 'Currency'],");
-    expect(result).toContain('createPrismaTenancyExtension');
-    expect(result).toContain("import { TenancyModule, createPrismaTenancyExtension } from '@nestarc/tenancy';");
   });
 
   it('should include both autoInjectTenantId and sharedModels when both are provided', () => {
@@ -230,11 +237,6 @@ describe('generateModuleSetup', () => {
     });
     expect(result).toContain('autoInjectTenantId: true,');
     expect(result).toContain("sharedModels: ['Country'],");
-  });
-
-  it('should NOT include createPrismaTenancyExtension block when neither flag is set', () => {
-    const result = generateModuleSetup(baseOptions);
-    expect(result).not.toContain('createPrismaTenancyExtension');
   });
 
   it('should include validateTenantId when tenantFormat is Custom and customRegex is provided', () => {

@@ -19,7 +19,9 @@
   },
   "typesVersions": {
     "*": {
-      "testing": ["dist/testing/index.d.ts"]
+      "testing": [
+        "dist/testing/index.d.ts"
+      ]
     }
   },
   "bin": {
@@ -67,6 +69,7 @@
     "@eslint/js": "^10.0.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
+    "@nestjs/event-emitter": "^3.0.1",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
     "@prisma/client": "^6.0.0",

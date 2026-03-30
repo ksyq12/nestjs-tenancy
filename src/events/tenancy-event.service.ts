@@ -14,11 +14,14 @@ export class TenancyEventService implements OnModuleInit {
 
   constructor(private readonly moduleRef: ModuleRef) {}
 
-  onModuleInit() {
+  async onModuleInit() {
     try {
-      this.emitter = this.moduleRef.get('EventEmitter2', { strict: false });
+      // EventEmitter2 is registered as a class token, not a string token.
+      // Dynamic import avoids making @nestjs/event-emitter a hard dependency.
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      this.emitter = this.moduleRef.get(EventEmitter2, { strict: false });
     } catch {
-      // @nestjs/event-emitter not installed — events silently skip
+      // @nestjs/event-emitter not installed or not imported — events silently skip
     }
   }
 
