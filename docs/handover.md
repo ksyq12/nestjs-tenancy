@@ -195,7 +195,7 @@ const prismaWithTenant = prisma.$extends({
       const tenantId = tenantStorage.getStore()?.tenantId;
       if (tenantId) {
         return prisma.$transaction([
-          prisma.$executeRawUnsafe(`SET LOCAL app.current_tenant = '${tenantId}'`),
+          prisma.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, TRUE)`,
           query(args),
         ]).then(([, result]) => result);
       }
@@ -205,7 +205,7 @@ const prismaWithTenant = prisma.$extends({
 });
 ```
 
-> ⚠️ SQL 인젝션 주의: `tenantId`는 반드시 검증/이스케이프 필요
+> ✅ `$executeRaw` tagged template + `set_config()` bind parameter로 SQL 인젝션을 구조적으로 차단.
 
 ### 3. NestJS DynamicModule 패턴
 
