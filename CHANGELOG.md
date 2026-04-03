@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-04-03
+
+### Added
+
+- **Tenant ID forgery prevention** — `crossCheckExtractor` option on `TenancyModuleOptions` for cross-validating the primary tenant ID against a secondary source (e.g., JWT claim vs header). Emits `tenant.cross_check_failed` event on mismatch. Configurable via `onCrossCheckFailed: 'reject' | 'log'` (default: `'reject'`).
+- **OpenTelemetry integration** — `TenancyTelemetryService` automatically adds `tenant.id` attribute to active spans. Optional `createSpans` option creates custom `tenant.resolved` spans. Follows the same graceful degradation pattern as event-emitter integration — silently skips if `@opentelemetry/api` is not installed.
+- **`TelemetryOptions`** interface — configurable `spanAttributeKey` (default: `'tenant.id'`) and `createSpans` (default: `false`).
+- **`TenantCrossCheckFailedEvent`** type — typed payload for the `tenant.cross_check_failed` event.
+- **CLI `check --db-setting-key`** flag — pass a custom PostgreSQL setting key to `npx @nestarc/tenancy check` for projects that don't use the default `app.current_tenant`.
+
+### Fixed
+
+- **Bull duck-typing false positives** — `TenantContextInterceptor` now requires the `bullDataKey` to actually exist in the RPC payload data before matching as Bull transport. Previously, any object-typed RPC payload would enter the Bull extraction path.
+- **CLI `check` setting key validation** — now validates ALL `current_setting()` occurrences in the SQL file, not just the first. Prevents false green when some policies reference the wrong key.
+- **Telemetry span lifecycle** — `tenant.resolved` span is now closed in a `finally` block, preventing span leaks when `onTenantResolved` hook throws.
+
+### Changed
+
+- **CI compatibility matrix** — added `compat` job testing Nest 10 + Prisma 5 (Node 20) alongside Nest 11 + Prisma 6 (Node 22), matching the declared peer dependency range.
+- **`@opentelemetry/api`** added as optional peer dependency (`^1.0.0`).
+
+### Migration Guide
+
+**No breaking changes.** All new features are opt-in:
+- Cross-check: pass `crossCheckExtractor` to `TenancyModule.forRoot()`
+- Telemetry: install `@opentelemetry/api` and optionally set `telemetry` options
+- CLI: use `--db-setting-key=your.key` with `check` command if using a non-default key
+
 ## [0.6.0] - 2026-04-02
 
 ### Added

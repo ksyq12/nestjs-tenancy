@@ -115,13 +115,14 @@ export function runCheck(options?: CheckOptions): CheckResult {
 
   }
 
-  // Check setting key (file-level, not per-table)
-  const keyRegex = /current_setting\('([^']+)'/;
-  const keyMatch = sqlContent.match(keyRegex);
-  if (keyMatch && keyMatch[1] !== expectedKey) {
-    warnings.push(
-      `Setting key mismatch: SQL uses '${keyMatch[1]}', expected '${expectedKey}'`,
-    );
+  // Check setting key consistency across ALL current_setting() calls
+  const keyRegex = /current_setting\('([^']+)'/g;
+  for (const keyMatch of sqlContent.matchAll(keyRegex)) {
+    if (keyMatch[1] !== expectedKey) {
+      warnings.push(
+        `Setting key mismatch: SQL uses '${keyMatch[1]}', expected '${expectedKey}'`,
+      );
+    }
   }
 
   const inSync =

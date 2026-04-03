@@ -13,13 +13,15 @@ if (command === 'init') {
     });
 } else if (command === 'check') {
   const { runCheck } = require('./check');
-  const result = runCheck();
+  const dbSettingKeyArg = args.find((a: string) => a.startsWith('--db-setting-key='));
+  const dbSettingKey = dbSettingKeyArg ? dbSettingKeyArg.split('=')[1] : undefined;
+  const result = runCheck({ dbSettingKey });
   process.exit(result.inSync ? 0 : 1);
 } else {
   console.log('Usage: npx @nestarc/tenancy <command> [options]');
   console.log('');
   console.log('Commands:');
-  console.log('  init [--dry-run]   Scaffold RLS policies and module configuration');
-  console.log('  check              Check if tenancy-setup.sql is in sync with Prisma schema');
+  console.log('  init [--dry-run]                    Scaffold RLS policies and module configuration');
+  console.log('  check [--db-setting-key=<key>]      Check if tenancy-setup.sql is in sync with Prisma schema');
   process.exit(0);
 }

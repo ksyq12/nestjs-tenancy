@@ -578,9 +578,48 @@ class TenantLogger {
 }
 ```
 
-Events: `tenant.resolved`, `tenant.not_found`, `tenant.validation_failed`, `tenant.context_bypassed`.
+Events: `tenant.resolved`, `tenant.not_found`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`.
 
 If `@nestjs/event-emitter` is not installed, events are silently skipped — no errors.
+
+## Tenant ID Forgery Prevention
+
+Cross-validate the tenant ID against a secondary source to prevent header forgery:
+
+```typescript
+import { JwtClaimTenantExtractor } from '@nestarc/tenancy';
+
+TenancyModule.forRoot({
+  tenantExtractor: 'X-Tenant-Id',
+  // Cross-check against JWT claim — rejects if they differ
+  crossCheckExtractor: new JwtClaimTenantExtractor({ claimKey: 'tenantId' }),
+  onCrossCheckFailed: 'reject', // 'reject' (default) | 'log'
+})
+```
+
+If the cross-check extractor returns `null` (e.g., no JWT present), validation is skipped — unauthenticated endpoints work normally. On mismatch, `tenant.cross_check_failed` event is emitted.
+
+## OpenTelemetry Integration
+
+Optional integration with `@opentelemetry/api`. Install the package to enable automatic tenant context in traces:
+
+```bash
+npm install @opentelemetry/api
+```
+
+```typescript
+TenancyModule.forRoot({
+  tenantExtractor: 'X-Tenant-Id',
+  telemetry: {
+    spanAttributeKey: 'tenant.id', // default
+    createSpans: true,              // create custom spans for tenant lifecycle
+  },
+})
+```
+
+When enabled, `tenant.id` is automatically added as a span attribute to the active span on every request. If `createSpans` is `true`, a `tenant.resolved` span is also created.
+
+If `@opentelemetry/api` is not installed, telemetry is silently skipped — no errors.
 
 ## Microservice Propagation
 
@@ -778,9 +817,11 @@ Check if your SQL is in sync with the Prisma schema:
 
 ```bash
 npx @nestarc/tenancy check
+# With custom setting key:
+npx @nestarc/tenancy check --db-setting-key=custom.tenant_key
 ```
 
-Validates table coverage, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency. Exits with code 0 (in sync) or 1 (drift detected).
+Validates table coverage, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency across all policies. Exits with code 0 (in sync) or 1 (drift detected).
 
 ## License
 
