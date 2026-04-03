@@ -18,6 +18,7 @@ import { TenancyService } from './services/tenancy.service';
 import { TenantMiddleware } from './middleware/tenant.middleware';
 import { TenancyGuard } from './guards/tenancy.guard';
 import { TenancyEventService } from './events/tenancy-event.service';
+import { TenancyTelemetryService } from './telemetry/tenancy-telemetry.service';
 import { TENANCY_MODULE_OPTIONS } from './tenancy.constants';
 
 @Module({})
@@ -37,9 +38,10 @@ export class TenancyModule implements NestModule {
         TenancyContext,
         TenancyService,
         TenancyEventService,
+        TenancyTelemetryService,
         { provide: APP_GUARD, useClass: TenancyGuard },
       ],
-      exports: [TenancyService, TenancyEventService, TENANCY_MODULE_OPTIONS],
+      exports: [TenancyService, TenancyEventService, TenancyTelemetryService, TENANCY_MODULE_OPTIONS],
     };
   }
 
@@ -55,9 +57,10 @@ export class TenancyModule implements NestModule {
         TenancyContext,
         TenancyService,
         TenancyEventService,
+        TenancyTelemetryService,
         { provide: APP_GUARD, useClass: TenancyGuard },
       ],
-      exports: [TenancyService, TenancyEventService, TENANCY_MODULE_OPTIONS],
+      exports: [TenancyService, TenancyEventService, TenancyTelemetryService, TENANCY_MODULE_OPTIONS],
     };
   }
 

@@ -6,6 +6,7 @@ export {
   TenancyModuleAsyncOptions,
   TenancyModuleOptionsFactory,
 } from './interfaces/tenancy-module-options.interface';
+export type { TelemetryOptions } from './interfaces/tenancy-module-options.interface';
 export { TenantExtractor } from './interfaces/tenant-extractor.interface';
 export { CurrentTenant } from './decorators/current-tenant.decorator';
 export { BypassTenancy } from './decorators/bypass-tenancy.decorator';
@@ -38,10 +39,12 @@ export type { GrpcPropagationOptions, GrpcMetadataLike } from './propagation/grp
 export { TenantContextInterceptor } from './propagation/tenant-context.interceptor';
 export type { TenantContextInterceptorOptions } from './propagation/tenant-context.interceptor';
 export { TenancyEventService } from './events/tenancy-event.service';
+export { TenancyTelemetryService } from './telemetry/tenancy-telemetry.service';
 export { TenancyEvents } from './events/tenancy-events';
 export type {
   TenantResolvedEvent,
   TenantNotFoundEvent,
   TenantValidationFailedEvent,
   TenantContextBypassedEvent,
+  TenantCrossCheckFailedEvent,
 } from './events/tenancy-events';

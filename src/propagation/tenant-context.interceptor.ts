@@ -134,8 +134,8 @@ export class TenantContextInterceptor implements NestInterceptor {
       return this.extractFromGrpcMetadata(ctx);
     }
 
-    // Bull: tenant ID is embedded in the job data
-    if (data && typeof data === 'object') {
+    // Bull: tenant ID key must actually exist in the job data
+    if (data && typeof data === 'object' && this.bullDataKey in (data as Record<string, unknown>)) {
       return this.extractFromBullData(data as Record<string, unknown>);
     }
 

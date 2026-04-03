@@ -1,13 +1,20 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenantMiddleware } from '../src/middleware/tenant.middleware';
 import { TenancyEventService } from '../src/events/tenancy-event.service';
+import { TenancyTelemetryService } from '../src/telemetry/tenancy-telemetry.service';
 import { TenancyEvents } from '../src/events/tenancy-events';
 import { HeaderTenantExtractor } from '../src/extractors/header.extractor';
 import { TenancyModuleOptions } from '../src/interfaces/tenancy-module-options.interface';
+import { TenantExtractor } from '../src/interfaces/tenant-extractor.interface';
 
 function createMockEventService(): TenancyEventService & { emit: jest.Mock } {
   return { emit: jest.fn(), onModuleInit: jest.fn() } as any;
+}
+
+function createMockTelemetryService(): TenancyTelemetryService {
+  const options: TenancyModuleOptions = { tenantExtractor: 'x-tenant-id' };
+  return new TenancyTelemetryService(options);
 }
 
 function createMiddleware(
@@ -15,7 +22,12 @@ function createMiddleware(
   eventService?: TenancyEventService,
 ): TenantMiddleware {
   const options: TenancyModuleOptions = { tenantExtractor: 'x-tenant-id', ...overrides };
-  return new TenantMiddleware(options, new TenancyContext(), eventService ?? createMockEventService());
+  return new TenantMiddleware(
+    options,
+    new TenancyContext(),
+    eventService ?? createMockEventService(),
+    createMockTelemetryService(),
+  );
 }
 
 const mockReq = (headers: Record<string, string> = {}) => ({ headers }) as any;
@@ -201,6 +213,95 @@ describe('TenantMiddleware', () => {
       ).rejects.toThrow(BadRequestException);
 
       expect(onTenantResolved).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Cross-check validation', () => {
+    const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
+    const OTHER_UUID = '660e8400-e29b-41d4-a716-446655440000';
+
+    function staticExtractor(value: string | null): TenantExtractor {
+      return { extract: () => value };
+    }
+
+    it('should pass when cross-check matches primary extractor', (done) => {
+      const mw = createMiddleware({
+        crossCheckExtractor: staticExtractor(VALID_UUID),
+      });
+      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+        expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
+        done();
+      });
+    });
+
+    it('should throw ForbiddenException on mismatch (reject mode)', async () => {
+      const mw = createMiddleware({
+        crossCheckExtractor: staticExtractor(OTHER_UUID),
+        onCrossCheckFailed: 'reject',
+      });
+      await expect(
+        new Promise((resolve, reject) => {
+          mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), resolve).catch(reject);
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should log warning and continue on mismatch (log mode)', (done) => {
+      const mw = createMiddleware({
+        crossCheckExtractor: staticExtractor(OTHER_UUID),
+        onCrossCheckFailed: 'log',
+      });
+      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+        // Continued with primary extractor value despite mismatch
+        expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
+        done();
+      });
+    });
+
+    it('should skip validation when cross-check returns null', (done) => {
+      const mw = createMiddleware({
+        crossCheckExtractor: staticExtractor(null),
+        onCrossCheckFailed: 'reject',
+      });
+      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+        expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
+        done();
+      });
+    });
+
+    it('should default to reject mode', async () => {
+      const mw = createMiddleware({
+        crossCheckExtractor: staticExtractor(OTHER_UUID),
+        // onCrossCheckFailed not set — defaults to 'reject'
+      });
+      await expect(
+        new Promise((resolve, reject) => {
+          mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), resolve).catch(reject);
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should emit CROSS_CHECK_FAILED event on mismatch', async () => {
+      const eventService = createMockEventService();
+      const mw = createMiddleware(
+        { crossCheckExtractor: staticExtractor(OTHER_UUID) },
+        eventService,
+      );
+      const req = mockReq({ 'x-tenant-id': VALID_UUID });
+
+      await expect(
+        new Promise((resolve, reject) => {
+          mw.use(req, mockRes(), resolve).catch(reject);
+        }),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(eventService.emit).toHaveBeenCalledWith(
+        TenancyEvents.CROSS_CHECK_FAILED,
+        expect.objectContaining({
+          extractedTenantId: VALID_UUID,
+          crossCheckTenantId: OTHER_UUID,
+        }),
+      );
     });
   });
 
