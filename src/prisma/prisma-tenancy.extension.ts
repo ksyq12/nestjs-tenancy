@@ -58,13 +58,11 @@ export interface PrismaTenancyExtensionOptions {
  * - `tenantIdField`: Field name to inject tenant ID into (default: tenant_id)
  * - `sharedModels`: Models that are shared across tenants (skips RLS and injection)
  *
- * **Transaction limitation:**
- * This extension uses a batch `$transaction([set_config, query])` internally.
- * If the caller is already inside an interactive transaction (`$transaction(async (tx) => ...)`),
- * the `set_config` call runs in a separate connection and does NOT propagate into the
- * caller's transaction. RLS still enforces row-level isolation, but the PostgreSQL session
- * variable will not be set within the interactive transaction's connection.
- * For interactive transactions, call `set_config` manually as the first statement.
+ * **Interactive transactions:**
+ * By default, the batch `$transaction([set_config, query])` does not propagate into
+ * interactive transactions (`$transaction(async (tx) => ...)`). Two solutions:
+ * 1. Enable `interactiveTransactionSupport: true` for transparent handling (uses Prisma internals).
+ * 2. Use the standalone `tenancyTransaction()` helper (public APIs only).
  *
  * Usage:
  * ```typescript

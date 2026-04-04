@@ -31,7 +31,7 @@ One line of code. Automatic tenant isolation.
 - **Multi-schema support** — `@@schema()` directives generate schema-qualified SQL (e.g., `"auth"."users"`)
 - **ccTLD-aware subdomain extraction** — accurate parsing for `.co.uk`, `.co.jp`, `.com.au`, etc.
 - **SQL injection safe** — `set_config()` with bind parameters, plus UUID validation by default
-- **NestJS 10 & 11** compatible, **Prisma 5 & 6** compatible
+- **NestJS 10 & 11** compatible, **Prisma 5 & 6** compatible (CI-tested with Prisma 6; Prisma 5 unit-tested)
 
 ## Performance
 
@@ -153,7 +153,7 @@ createPrismaTenancyExtension(tenancyService, {
 
 > **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
 
-> **Note:** When using interactive transactions (`$transaction(async (tx) => ...)`), the `set_config` call runs in a separate connection. Call `set_config` manually as the first statement inside interactive transactions.
+> **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Enable `interactiveTransactionSupport: true` for transparent handling, or use the `tenancyTransaction()` helper. See [Interactive Transactions](#interactive-transactions) below.
 
 ### Interactive Transactions
 

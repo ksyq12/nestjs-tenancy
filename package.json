@@ -68,9 +68,6 @@
     },
     "@opentelemetry/api": {
       "optional": true
-    },
-    "@types/express": {
-      "optional": true
     }
   },
   "devDependencies": {
