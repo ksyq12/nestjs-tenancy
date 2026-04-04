@@ -273,3 +273,76 @@ describe('tenancyTransaction() E2E', () => {
     expect(rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
   });
 });
+
+describe('interactiveTransactionSupport E2E', () => {
+  let context: TenancyContext;
+  let service: TenancyService;
+  let prisma: any;
+
+  beforeAll(async () => {
+    const PrismaClient = require(path.join(__dirname, 'generated')).PrismaClient;
+    context = new TenancyContext();
+    service = new TenancyService(context);
+
+    const basePrisma = new PrismaClient({ datasourceUrl: APP_URL });
+    prisma = basePrisma.$extends(
+      createPrismaTenancyExtension(service, {
+        interactiveTransactionSupport: true,
+      }),
+    );
+
+    await prisma.$connect();
+  }, 30000);
+
+  afterAll(async () => {
+    await sharedAdminClient.query(`DELETE FROM users WHERE name = 'ItxTest'`);
+    if (prisma) await prisma.$disconnect();
+  });
+
+  it('should apply RLS inside interactive transaction with ITX support', async () => {
+    const rows = await new Promise<any[]>((resolve, reject) => {
+      context.run(TENANT_1, async () => {
+        try {
+          resolve(await prisma.$transaction(async (tx: any) => {
+            return tx.user.findMany();
+          }));
+        } catch (e) { reject(e); }
+      });
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r: any) => r.tenant_id === TENANT_1)).toBe(true);
+  });
+
+  it('should isolate tenants in interactive transaction with ITX support', async () => {
+    const rows = await new Promise<any[]>((resolve, reject) => {
+      context.run(TENANT_2, async () => {
+        try {
+          resolve(await prisma.$transaction(async (tx: any) => {
+            return tx.user.findMany();
+          }));
+        } catch (e) { reject(e); }
+      });
+    });
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
+  });
+
+  it('should support writes in interactive transaction with ITX support', async () => {
+    const user = await new Promise<any>((resolve, reject) => {
+      context.run(TENANT_1, async () => {
+        try {
+          resolve(await prisma.$transaction(async (tx: any) => {
+            return tx.user.create({
+              data: { name: 'ItxTest', email: 'itx@test.com', tenant_id: TENANT_1 },
+            });
+          }));
+        } catch (e) { reject(e); }
+      });
+    });
+
+    expect(user.name).toBe('ItxTest');
+    expect(user.tenant_id).toBe(TENANT_1);
+  });
+});
