@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import { TenancyRequest } from '../interfaces/tenancy-request.interface';
 import { TenantExtractor } from '../interfaces/tenant-extractor.interface';
 
 export class HeaderTenantExtractor implements TenantExtractor {
@@ -8,7 +8,7 @@ export class HeaderTenantExtractor implements TenantExtractor {
     this.headerName = headerName.toLowerCase();
   }
 
-  extract(request: Request): string | null {
+  extract(request: TenancyRequest): string | null {
     const value = request.headers[this.headerName];
     if (!value) return null;
     return Array.isArray(value) ? value[0] : value;

@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import { TenancyRequest } from '../interfaces/tenancy-request.interface';
 
 export const TenancyEvents = {
   RESOLVED: 'tenant.resolved',
@@ -10,16 +10,16 @@ export const TenancyEvents = {
 
 export interface TenantResolvedEvent {
   tenantId: string;
-  request: Request;
+  request: TenancyRequest;
 }
 
 export interface TenantNotFoundEvent {
-  request: Request;
+  request: TenancyRequest;
 }
 
 export interface TenantValidationFailedEvent {
   tenantId: string;
-  request: Request;
+  request: TenancyRequest;
 }
 
 export interface TenantContextBypassedEvent {
@@ -29,5 +29,5 @@ export interface TenantContextBypassedEvent {
 export interface TenantCrossCheckFailedEvent {
   extractedTenantId: string;
   crossCheckTenantId: string;
-  request: Request;
+  request: TenancyRequest;
 }

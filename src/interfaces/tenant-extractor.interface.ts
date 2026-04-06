@@ -1,5 +1,5 @@
-import { Request } from 'express';
+import { TenancyRequest } from './tenancy-request.interface';
 
 export interface TenantExtractor {
-  extract(request: Request): string | null | Promise<string | null>;
+  extract(request: TenancyRequest): string | null | Promise<string | null>;
 }

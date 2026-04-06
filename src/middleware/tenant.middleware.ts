@@ -6,7 +6,7 @@ import {
   Logger,
   NestMiddleware,
 } from '@nestjs/common';
-import { Request, Response, NextFunction } from 'express';
+import { TenancyRequest, TenancyResponse } from '../interfaces/tenancy-request.interface';
 import { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import { TenantExtractor } from '../interfaces/tenant-extractor.interface';
 import { TenancyContext } from '../services/tenancy-context';
@@ -43,7 +43,7 @@ export class TenantMiddleware implements NestMiddleware {
     this.onCrossCheckFailed = options.onCrossCheckFailed ?? 'reject';
   }
 
-  async use(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  async use(req: TenancyRequest, _res: TenancyResponse, next: (error?: any) => void): Promise<void> {
     const tenantId = await this.extractor.extract(req);
 
     if (!tenantId) {

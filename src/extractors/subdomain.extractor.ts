@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import { TenancyRequest } from '../interfaces/tenancy-request.interface';
 import { TenantExtractor } from '../interfaces/tenant-extractor.interface';
 
 export interface SubdomainExtractorOptions {
@@ -31,8 +31,9 @@ export class SubdomainTenantExtractor implements TenantExtractor {
     this.psl = loadPsl();
   }
 
-  extract(request: Request): string | null {
+  extract(request: TenancyRequest): string | null {
     const hostname = request.hostname;
+    if (!hostname) return null;
 
     // Reject IP addresses — psl treats octets as domain segments
     if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {

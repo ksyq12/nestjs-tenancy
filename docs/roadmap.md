@@ -155,6 +155,23 @@ Prisma 전용이라는 한계를 벗어나면 사용자 풀이 넓어진다.
 
 ---
 
+## Phase 4.7: 안정화 + 프레임워크 중립 (v0.9.0) ✅ 완료
+
+### 4.7-1. Express 타입 분리 ✅
+
+- `TenancyRequest` / `TenancyResponse` 프레임워크-중립 인터페이스 도입
+- `@types/express` peerDependencies에서 제거
+- 퍼블릭 API (TenantExtractor, TenancyModuleOptions, 이벤트 타입) Express 의존 제거
+- Fastify, raw Node.js HTTP 호환
+
+### 4.7-2. 문서 정비 ✅
+
+- README 호환성 주장 명확화 (E2E vs unit-tested)
+- 커스텀 추출기 예제 TenancyRequest 사용
+- SECURITY.md 지원 버전 최신화
+
+---
+
 ## Phase 5: 프로덕션 신뢰 (v1.0.0)
 
 ### 5-1. 보안 강화
@@ -185,7 +202,10 @@ Prisma 전용이라는 한계를 벗어나면 사용자 풀이 넓어진다.
 ✅ v0.3.0 (완료)    withoutTenant() + tenancyTransaction() + ccTLD + CLI
 ✅ v0.4.0 (완료)    Fail-Closed + Testing Utilities + Event System
 ✅ v0.5.0 (완료)    에러 통일 + HTTP 테넌트 전파
-→ v0.6.0 (다음)    비동기 전파 (Kafka, gRPC, Bull)
+✅ v0.6.0 (완료)    비동기 전파 (Kafka, gRPC, Bull)
+✅ v0.7.0 (완료)    위조 방지 + OpenTelemetry
+✅ v0.8.0 (완료)    빌드 안정화 + 회귀 테스트
+✅ v0.9.0 (완료)    Express 타입 분리 + 프레임워크 중립
 → v1.0.0           보안 강화 + 운영 도구 + 문서 사이트 + 다중 DB + ORM 어댑터
 ```
 

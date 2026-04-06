@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-04-06
+
+### Added
+
+- **`TenancyRequest` / `TenancyResponse` interfaces** — framework-agnostic HTTP types that replace direct Express dependency in the public API. Compatible with Express, Fastify, and raw Node.js `http.IncomingMessage`.
+
+### Changed (Breaking)
+
+- **`TenantExtractor.extract()`** now accepts `TenancyRequest` instead of Express `Request`. Existing implementations using Express `Request` continue to work due to TypeScript's structural typing and method bivariance. If you need Express-specific properties, use type assertion: `(request as import('express').Request)`.
+- **`TenancyModuleOptions` callbacks** (`onTenantResolved`, `onTenantNotFound`) now use `TenancyRequest` / `TenancyResponse` instead of Express types.
+- **Event payload types** (`TenantResolvedEvent`, etc.) now use `TenancyRequest` instead of Express `Request`.
+- **`@types/express`** removed from `peerDependencies`. Only needed as a devDependency if you use Express-specific type assertions.
+
+### Fixed
+
+- **Custom Extractor docs** updated to use `TenancyRequest` instead of Express `Request`
+- **Compatibility claim** clarified: Prisma 6 is E2E-tested, Prisma 5 is unit-tested
+
+### Migration Guide
+
+**Express users (most common):** No code changes required. `express.Request` satisfies `TenancyRequest` structurally. Your existing extractors and callbacks compile without modification.
+
+**Fastify users:** You can now use `@nestarc/tenancy` without installing `@types/express`. Fastify `FastifyRequest` satisfies `TenancyRequest`.
+
+**Custom extractor authors:** If your extractor uses Express-specific properties (e.g., `req.cookies`, `req.ip`), they are still accessible via the `[key: string]: any` index signature. For full type safety, cast: `(request as import('express').Request).cookies`.
+
 ## [0.8.0] - 2026-04-04
 
 ### Fixed

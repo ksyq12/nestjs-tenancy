@@ -8,6 +8,7 @@ export {
 } from './interfaces/tenancy-module-options.interface';
 export type { TelemetryOptions } from './interfaces/tenancy-module-options.interface';
 export { TenantExtractor } from './interfaces/tenant-extractor.interface';
+export type { TenancyRequest, TenancyResponse } from './interfaces/tenancy-request.interface';
 export { CurrentTenant } from './decorators/current-tenant.decorator';
 export { BypassTenancy } from './decorators/bypass-tenancy.decorator';
 export { HeaderTenantExtractor } from './extractors/header.extractor';

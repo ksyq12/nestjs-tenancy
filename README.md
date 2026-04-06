@@ -465,15 +465,16 @@ TenancyModule.forRoot({
 #### Custom Extractor
 
 ```typescript
-import { TenantExtractor } from '@nestarc/tenancy';
-import { Request } from 'express';
+import { TenantExtractor, TenancyRequest } from '@nestarc/tenancy';
 
 export class CookieTenantExtractor implements TenantExtractor {
-  extract(request: Request): string | null {
+  extract(request: TenancyRequest): string | null {
     return request.cookies?.['tenant_id'] ?? null;
   }
 }
 ```
+
+> **Framework-agnostic:** `TenancyRequest` is satisfied by Express `Request`, Fastify `FastifyRequest`, and any object with a `headers` property. If you need platform-specific properties, use type assertion: `(request as import('express').Request).ip`.
 
 ### Lifecycle Hooks
 

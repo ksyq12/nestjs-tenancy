@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import { TenancyRequest } from '../interfaces/tenancy-request.interface';
 import { TenantExtractor } from '../interfaces/tenant-extractor.interface';
 
 export interface JwtClaimExtractorOptions {
@@ -25,7 +25,7 @@ export class JwtClaimTenantExtractor implements TenantExtractor {
     this.headerName = (options.headerName ?? 'authorization').toLowerCase();
   }
 
-  extract(request: Request): string | null {
+  extract(request: TenancyRequest): string | null {
     const headerValue = request.headers[this.headerName];
     if (!headerValue || Array.isArray(headerValue)) return null;
 

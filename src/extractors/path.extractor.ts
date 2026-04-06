@@ -1,4 +1,4 @@
-import { Request } from 'express';
+import { TenancyRequest } from '../interfaces/tenancy-request.interface';
 import { TenantExtractor } from '../interfaces/tenant-extractor.interface';
 
 export interface PathExtractorOptions {
@@ -17,8 +17,9 @@ export class PathTenantExtractor implements TenantExtractor {
     );
   }
 
-  extract(request: Request): string | null {
+  extract(request: TenancyRequest): string | null {
     if (this.paramIndex === -1) return null;
+    if (!request.path) return null;
 
     const pathSegments = request.path.split('/').filter(Boolean);
 
