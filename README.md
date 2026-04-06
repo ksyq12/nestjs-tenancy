@@ -504,8 +504,8 @@ TenancyModule.forRoot({
 
 | Hook | Signature | When |
 |------|-----------|------|
-| `onTenantResolved` | `(tenantId: string, req: Request) => void \| Promise<void>` | After successful extraction and validation |
-| `onTenantNotFound` | `(req: Request, res: Response) => void \| 'skip' \| Promise<void \| 'skip'>` | When no tenant ID could be extracted |
+| `onTenantResolved` | `(tenantId: string, req: TenancyRequest) => void \| Promise<void>` | After successful extraction and validation |
+| `onTenantNotFound` | `(req: TenancyRequest, res: TenancyResponse) => void \| 'skip' \| Promise<void \| 'skip'>` | When no tenant ID could be extracted |
 
 ## Error Responses
 

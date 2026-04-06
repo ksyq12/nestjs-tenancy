@@ -29,7 +29,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "postbuild": "printf '#!/usr/bin/env node\\n' | cat - dist/cli/index.js > dist/cli/index.tmp && mv dist/cli/index.tmp dist/cli/index.js",
+    "postbuild": "node -e \"const fs=require('fs');const f='dist/cli/index.js';fs.writeFileSync(f,'#!/usr/bin/env node\\n'+fs.readFileSync(f,'utf8'))\"",
     "test": "jest --testPathIgnorePatterns=e2e",
     "test:watch": "jest --watch --testPathIgnorePatterns=e2e",
     "test:cov": "jest --coverage --testPathIgnorePatterns=e2e",
