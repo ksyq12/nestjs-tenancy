@@ -29,8 +29,10 @@ export interface TenancyModuleOptions {
    *
    * Behavior based on return value:
    * - `void` / `undefined`: request continues to the next middleware (observation-only hook)
-   * - `'skip'`: request continues but `next()` is NOT called — you must have already
-   *   sent a response (e.g., via injected `TenancyResponse`) or thrown an exception
+   * - `'skip'`: request continues but `next()` is NOT called.
+   *   **Warning:** You must send a response (e.g., `response.status(403).end()`)
+   *   or throw an exception before returning `'skip'`. Otherwise the HTTP request
+   *   will hang indefinitely with no response sent to the client.
    *
    * Throwing an exception (e.g., `throw new ForbiddenException()`) always aborts
    * the request regardless of return value.
