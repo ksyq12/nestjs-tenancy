@@ -31,11 +31,12 @@ import { DEFAULT_PROPAGATION_HEADER } from '../tenancy.constants';
  * });
  * ```
  */
+const _ctx = new TenancyContext();
+
 export function propagateTenantHeaders(
   headerName: string = DEFAULT_PROPAGATION_HEADER,
 ): Record<string, string> {
-  const context = new TenancyContext();
-  const tenantId = context.getTenantId();
+  const tenantId = _ctx.getTenantId();
   if (!tenantId) return {};
   return { [headerName]: tenantId };
 }
