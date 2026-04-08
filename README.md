@@ -151,7 +151,6 @@ createPrismaTenancyExtension(tenancyService, {
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
 | `failClosed` | `boolean` | `false` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
 | `interactiveTransactionSupport` | `boolean` | `false` | Enable transparent `set_config` inside interactive transactions. Validates Prisma compatibility at startup — throws immediately if unsupported. Alternative: `tenancyTransaction()` helper |
-| `experimentalTransactionSupport` | `boolean` | `false` | **Deprecated** — use `interactiveTransactionSupport`. Preserves fallback-to-batch behavior when Prisma internals are unavailable. Will be removed in v1.0 |
 
 > **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
 
@@ -274,7 +273,9 @@ export class UsersController {
 
 ### @BypassTenancy() Decorator
 
-Skip tenant enforcement on specific routes (e.g., health checks, public endpoints):
+Skip the `TenancyGuard` tenant-required check on specific routes (e.g., health checks, public endpoints).
+
+> **Important:** `@BypassTenancy()` only bypasses the guard — it does **not** clear the tenant context. If the request contains a tenant header, `TenantMiddleware` still sets the context, so `getCurrentTenant()` may return a value and Prisma queries will still be RLS-filtered. To explicitly run without tenant context, use `withoutTenant()`.
 
 ```typescript
 import { Controller, Get } from '@nestjs/common';
@@ -594,13 +595,17 @@ import { JwtClaimTenantExtractor } from '@nestarc/tenancy';
 
 TenancyModule.forRoot({
   tenantExtractor: 'X-Tenant-Id',
-  // Cross-check against JWT claim — rejects if they differ
-  crossCheckExtractor: new JwtClaimTenantExtractor({ claimKey: 'tenantId' }),
-  onCrossCheckFailed: 'reject', // 'reject' (default) | 'log'
+  crossCheck: {
+    extractor: new JwtClaimTenantExtractor({ claimKey: 'tenantId' }),
+    onFailed: 'reject',  // 'reject' (default) | 'log'
+    required: false,      // when true, rejects requests without cross-check source
+  },
 })
 ```
 
-If the cross-check extractor returns `null` (e.g., no JWT present), validation is skipped — unauthenticated endpoints work normally. On mismatch, `tenant.cross_check_failed` event is emitted.
+If the cross-check extractor returns `null` (e.g., no JWT present), validation is skipped by default — unauthenticated endpoints work normally. Set `required: true` to reject requests when the cross-check source is missing, enforcing that every request must have a verifiable secondary source. On mismatch, `tenant.cross_check_failed` event is emitted.
+
+> **Deprecated format:** The flat `crossCheckExtractor` / `onCrossCheckFailed` fields still work but emit a deprecation warning. They will be removed in v2.0.
 
 ## OpenTelemetry Integration
 

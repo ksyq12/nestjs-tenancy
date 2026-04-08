@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] - 2026-04-08
+
+### Added
+
+- **`crossCheck.required` option** — when `true`, rejects requests with `ForbiddenException` if the cross-check extractor returns `null` (e.g., missing JWT). Enforces that every request must have a verifiable secondary tenant source. Defaults to `false`, preserving existing skip-on-null behavior.
+
+### Fixed
+
+- **`TenancyContext.run()` async overload** — added function overloads so async callbacks correctly return `Promise<T>` instead of `T`. Prevents silent bugs where callers omit `await` without a TypeScript error.
+- **Prisma schema parser brace handling** — replaced `[^}]*` regex with line-by-line brace-balancing parser. Fields with brace-containing defaults (e.g., `@default("{}")`) no longer cause `@@map` and `@@schema` directives to be missed.
+- **`SubdomainTenantExtractor` non-null assertion** — replaced `pslModule!` with explicit null check after `require('psl')`, removing the unsafe TypeScript non-null assertion.
+
+### Changed
+
+- **Observable teardown subscription type** — `innerSub` in `TenantContextInterceptor` explicitly typed as `Subscription | undefined`, clarifying the optional-chaining intent in the teardown function.
+- **`propagateTenantHeaders()` singleton** — replaced per-call `new TenancyContext()` with a module-level singleton instance, matching the pattern used in `current-tenant.decorator.ts`.
+
+### Documentation
+
+- **`onTenantResolved` JSDoc** — documented error propagation behavior: throwing is safe (telemetry span closes via `finally`), `getCurrentTenant()` is available inside the callback.
+- **`@BypassTenancy()` JSDoc** — clarified that the decorator only bypasses the guard, not the tenant context. `getCurrentTenant()` may still return a value and Prisma queries remain RLS-filtered.
+- **`onTenantNotFound` skip warning** — strengthened JSDoc to explicitly warn that returning `'skip'` without sending a response causes the HTTP request to hang indefinitely.
+- **README** — removed deprecated `experimentalTransactionSupport` from extension options table, updated cross-check section with `crossCheck` sub-object format and `required` option, clarified `@BypassTenancy` behavior.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added
