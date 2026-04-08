@@ -401,6 +401,47 @@ describe('TenantMiddleware', () => {
       });
     });
 
+    it('should reject when required is true and cross-check returns null', async () => {
+      const mw = createMiddleware({
+        crossCheck: { extractor: staticExtractor(null), required: true },
+      });
+      await expect(
+        new Promise((resolve, reject) => {
+          mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), resolve).catch(reject);
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should skip when required is false and cross-check returns null', (done) => {
+      const mw = createMiddleware({
+        crossCheck: { extractor: staticExtractor(null), required: false },
+      });
+      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+        expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
+        done();
+      });
+    });
+
+    it('should skip by default when cross-check returns null (required defaults to false)', (done) => {
+      const mw = createMiddleware({
+        crossCheck: { extractor: staticExtractor(null) },
+      });
+      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+        expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
+        done();
+      });
+    });
+
+    it('should pass when required is true and cross-check matches', (done) => {
+      const mw = createMiddleware({
+        crossCheck: { extractor: staticExtractor(VALID_UUID), required: true },
+      });
+      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+        expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
+        done();
+      });
+    });
+
     it('should emit deprecation warning for old crossCheckExtractor format', () => {
       const mw = createMiddleware({
         crossCheckExtractor: staticExtractor(VALID_UUID),

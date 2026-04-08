@@ -45,6 +45,8 @@ export interface TenancyModuleOptions {
    *
    * If the cross-check extractor returns null (e.g., no JWT present),
    * validation is skipped — allowing unauthenticated endpoints to work normally.
+   * Set `required: true` to reject requests when the cross-check extractor
+   * returns null, enforcing that every request must have a verifiable secondary source.
    */
   crossCheck?: {
     /** Secondary extractor to validate the tenant ID against. */
@@ -55,6 +57,13 @@ export interface TenancyModuleOptions {
      * - `'log'`: logs a warning and continues with the primary extractor's value
      */
     onFailed?: 'reject' | 'log';
+    /**
+     * When true, the cross-check extractor must return a non-null value.
+     * Throws ForbiddenException if the extractor returns null.
+     * Use this for endpoints that require authenticated cross-validation.
+     * @default false
+     */
+    required?: boolean;
   };
 
   /** @deprecated Use `crossCheck: { extractor }` instead. Will be removed in v2.0. */

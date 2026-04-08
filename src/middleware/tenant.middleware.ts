@@ -22,6 +22,7 @@ export class TenantMiddleware implements NestMiddleware {
   private readonly validate: (id: string) => boolean | Promise<boolean>;
   private readonly crossChecker: TenantExtractor | null;
   private readonly onCrossCheckFailed: 'reject' | 'log';
+  private readonly crossCheckRequired: boolean;
   private readonly logger = new Logger(TenantMiddleware.name);
 
   constructor(
@@ -42,6 +43,7 @@ export class TenantMiddleware implements NestMiddleware {
     if (options.crossCheck) {
       this.crossChecker = options.crossCheck.extractor;
       this.onCrossCheckFailed = options.crossCheck.onFailed ?? 'reject';
+      this.crossCheckRequired = options.crossCheck.required ?? false;
     } else if (options.crossCheckExtractor) {
       this.logger.warn(
         '`crossCheckExtractor` and `onCrossCheckFailed` are deprecated. ' +
@@ -50,9 +52,11 @@ export class TenantMiddleware implements NestMiddleware {
       );
       this.crossChecker = options.crossCheckExtractor;
       this.onCrossCheckFailed = options.onCrossCheckFailed ?? 'reject';
+      this.crossCheckRequired = false;
     } else {
       this.crossChecker = null;
       this.onCrossCheckFailed = 'reject';
+      this.crossCheckRequired = false;
     }
   }
 
@@ -77,6 +81,9 @@ export class TenantMiddleware implements NestMiddleware {
     // Cross-check: compare primary extractor result with secondary source
     if (this.crossChecker) {
       const crossCheckId = await this.crossChecker.extract(req);
+      if (!crossCheckId && this.crossCheckRequired) {
+        throw new ForbiddenException('Cross-check source is required but returned null');
+      }
       if (crossCheckId && crossCheckId !== tenantId) {
         this.eventService.emit(TenancyEvents.CROSS_CHECK_FAILED, {
           extractedTenantId: tenantId,
