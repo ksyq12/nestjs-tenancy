@@ -9,7 +9,9 @@ type TenantStore =
 export class TenancyContext {
   private static readonly storage = new AsyncLocalStorage<TenantStore>();
 
-  run<T>(tenantId: string, callback: () => T): T {
+  run<T>(tenantId: string, callback: () => Promise<T>): Promise<T>;
+  run<T>(tenantId: string, callback: () => T): T;
+  run<T>(tenantId: string, callback: () => T | Promise<T>): T | Promise<T> {
     return TenancyContext.storage.run({ tenantId, bypassed: false }, callback);
   }
 
