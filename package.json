@@ -34,6 +34,7 @@
     "test:watch": "jest --watch --testPathIgnorePatterns=e2e",
     "test:cov": "jest --coverage --testPathIgnorePatterns=e2e",
     "test:e2e": "node scripts/test-e2e.js",
+    "bench": "npx ts-node benchmarks/rls-overhead.ts",
     "lint": "tsc --noEmit && eslint src/ test/",
     "prepack": "npm run build"
   },
