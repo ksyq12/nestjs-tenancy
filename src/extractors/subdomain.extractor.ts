@@ -12,7 +12,8 @@ function loadPsl(): typeof import('psl') {
   try {
      
     pslModule = require('psl');
-    return pslModule!;
+    if (!pslModule) throw new Error('Failed to load "psl" module');
+    return pslModule;
   } catch {
     throw new Error(
       'SubdomainTenantExtractor requires the "psl" package. Install it: npm install psl',
