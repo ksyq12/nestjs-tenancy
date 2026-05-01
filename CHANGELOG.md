@@ -6,9 +6,58 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-05-01
+
+### Added
+
+- **`tenant.extraction_failed` event** — extractor exceptions are now emitted with safe error metadata and `requestSummary` before the original error is rethrown.
+- **Tenant index generation and drift checks** — generated RLS setup SQL now includes tenant indexes, and the CLI check command reports missing tenant indexes.
+- **JWT extractor hardening** — `JwtClaimTenantExtractor` now validates `exp` / `nbf` claims and includes a base64url fallback for runtimes without native `Buffer` base64url support.
+- **Bypass transition metadata** — `tenant.context_bypassed` payloads now include `previousTenantId` when `withoutTenant()` is called inside an existing tenant context.
+- **Testing helper safeguards** — `expectTenantIsolation()` now fails on empty two-tenant datasets, and `TestTenancyModule` provides default module options for broader provider tests.
+- **Structured error serialization** — `TenancyContextRequiredError` now exposes `toJSON()` with `name`, `message`, `model`, and `operation`.
+
 ### Changed (Breaking)
 
 - **Prisma extension fail-closed by default** — `createPrismaTenancyExtension()` now treats `failClosed` as `true` when omitted. Model operations without tenant context throw `TenancyContextRequiredError` unless the model is listed in `sharedModels` or the call runs inside `withoutTenant()`. Set `failClosed: false` explicitly to keep the previous pass-through behavior.
+- **Safe event request payloads** — built-in tenancy events now emit `requestSummary` (`{ method, path, ip, userAgent }`) instead of the raw request object. Listener code that reads `event.request` must migrate to `event.requestSummary`.
+
+### Changed
+
+- **Global DI symbols** — tenancy DI/metadata tokens now use `Symbol.for('@nestarc/tenancy/...')`, avoiding duplicate-package token mismatches in monorepos and bundled workspaces.
+- **NestJS 11 wildcard route compatibility** — middleware registration uses the path-to-regexp v8 named wildcard pattern (`{*splat}`) while remaining compatible with NestJS 10.
+- **Bearer token parsing** — JWT extraction now accepts case-insensitive `Bearer` schemes and flexible whitespace.
+- **`runWithoutTenant()` return semantics** — sync callbacks now return sync values, matching `TenancyContext.run()` overload behavior.
+- **Telemetry lifecycle spans** — tenant spans can now run as active OpenTelemetry scopes, preserving child-span parentage and tenant attributes.
+- **Benchmark methodology** — RLS overhead benchmarks now compare like-for-like app-user scenarios and report pure extension overhead separately from row-count reduction.
+- **TypeScript module resolution** — compiler settings now use the Node16 module resolution path required by modern TypeScript.
+- **Root barrel type-only exports** — public interfaces and option types now use `export type`, improving compatibility with `isolatedModules` and `verbatimModuleSyntax`.
+- **Async options inject typing** — `TenancyModuleAsyncOptions.inject` now reuses Nest's `FactoryProvider['inject']` type instead of `any[]`.
+- **Flat cross-check deprecation target** — `crossCheckExtractor` and `onCrossCheckFailed` remain supported but are now documented for removal in `v0.12.0`.
+
+### Fixed
+
+- **`forRootAsync({})` validation** — invalid async module options now throw immediately during module construction instead of failing later during Nest dependency resolution.
+- **CLI setup hardening** — custom regex input is validated before code generation, generated regex strings are safely escaped, and generated SQL no longer creates `app_user` with a hard-coded password.
+- **Extractor edge cases** — path extraction now ignores query/hash fragments and decodes URL-encoded path segments, subdomain extraction rejects IP/IPv6 hosts, and composite extraction preserves synchronous return paths when all extractors are synchronous.
+- **Error subclass behavior** — tenancy error classes now restore the prototype chain and capture V8 stack traces so `instanceof` works reliably in downlevel/transpiled consumers.
+- **Prisma `upsert.update` tenant mutation** — auto-injection now prevents user-provided `tenantIdField` changes in the update branch.
+- **Propagation edge cases** — Bull data-key collisions now fail fast, and gRPC fallback duck-typing is stricter to avoid non-metadata objects.
+- **Test and build stability** — removed async test timeout traps, shared common mocks, and fixed strict TypeScript casts in telemetry and Prisma extension code.
+
+### Security
+
+- **RLS production guidance** — README now documents required PostgreSQL patch versions for CVE-2024-10976 and operational limits around indexes, owner bypass, connection pooling, caches, and noisy neighbors.
+- **Default tenant indexes** — generated RLS SQL now adds tenant indexes to avoid full scans on common tenant-filtered queries.
+
+### Deprecation Policy
+
+Deprecated public APIs are marked with `@deprecated` JSDoc and documented here. Unless a security issue requires faster removal, deprecated APIs are planned for removal two minor versions later or at the next major release, whichever comes first. Current deprecated APIs:
+
+| API | Deprecated since | Planned removal |
+|-----|------------------|-----------------|
+| `crossCheckExtractor` | v0.10.0 | v0.12.0 |
+| `onCrossCheckFailed` | v0.10.0 | v0.12.0 |
 
 ## [0.10.1] - 2026-04-08
 
@@ -38,7 +87,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **`crossCheck` sub-object format** — new grouped configuration for tenant ID forgery prevention: `crossCheck: { extractor, onFailed }`. The flat `crossCheckExtractor` / `onCrossCheckFailed` fields are deprecated (will be removed in v2.0) and emit a warning when used.
+- **`crossCheck` sub-object format** — new grouped configuration for tenant ID forgery prevention: `crossCheck: { extractor, onFailed }`. The flat `crossCheckExtractor` / `onCrossCheckFailed` fields are deprecated (planned removal in v0.12.0) and emit a warning when used.
 - **`PrismaTransactionClient` structural type** — exported interface for typing the `prisma` parameter in `tenancyTransaction()`. Replaces the previous `any` type. `PrismaClient` satisfies this automatically.
 - **`TenancyEventMap` type** — type-safe mapping from event names to payload types. `TenancyEventService.emit()` now enforces correct event/payload combinations at compile time.
 - **`TenancyResponse` method signatures** — optional `status()`, `json()`, `end()` methods for better IDE guidance in `onTenantNotFound` callbacks.
@@ -78,7 +127,7 @@ request.cookies.session;
 
 **`crossCheck` configuration (optional — old format still works with deprecation warning):**
 ```typescript
-// Before (deprecated, will be removed in v2.0)
+// Before (deprecated, planned removal in v0.12.0)
 TenancyModule.forRoot({
   crossCheckExtractor: new JwtClaimTenantExtractor({ claimKey: 'org_id' }),
   onCrossCheckFailed: 'reject',

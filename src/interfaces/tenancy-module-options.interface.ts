@@ -81,10 +81,10 @@ export interface TenancyModuleOptions {
     required?: boolean;
   };
 
-  /** @deprecated Use `crossCheck: { extractor }` instead. Will be removed in v2.0. */
+  /** @deprecated Since v0.10.0. Use `crossCheck: { extractor }` instead. Planned removal in v0.12.0. */
   crossCheckExtractor?: TenantExtractor;
 
-  /** @deprecated Use `crossCheck: { onFailed }` instead. Will be removed in v2.0. */
+  /** @deprecated Since v0.10.0. Use `crossCheck: { onFailed }` instead. Planned removal in v0.12.0. */
   onCrossCheckFailed?: 'reject' | 'log';
 
   /**

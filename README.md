@@ -535,6 +535,10 @@ TenancyModule.forRoot({
 |----------|--------|---------|
 | Missing tenant header (no `@BypassTenancy`) | 403 | `Tenant ID is required` |
 | Invalid tenant ID format | 400 | `Invalid tenant ID format` |
+| Extractor throws or rejects | Propagates | Original error; emits `tenant.extraction_failed` first |
+| Cross-check mismatch | 403 | `Tenant ID mismatch` |
+| `crossCheck.required: true` and no secondary tenant source | 403 | `Cross-check source is required but returned null` |
+| Prisma query without tenant context (`failClosed`, default) | Throws | `TenancyContextRequiredError` |
 | Non-HTTP context (WebSocket, gRPC) | — | Guard skips (no enforcement) |
 
 ## Fail-Closed Mode
@@ -634,7 +638,11 @@ TenancyModule.forRoot({
 
 If the cross-check extractor returns `null` (e.g., no JWT present), validation is skipped by default — unauthenticated endpoints work normally. Set `required: true` to reject requests when the cross-check source is missing, enforcing that every request must have a verifiable secondary source. On mismatch, `tenant.cross_check_failed` event is emitted.
 
-> **Deprecated format:** The flat `crossCheckExtractor` / `onCrossCheckFailed` fields still work but emit a deprecation warning. They will be removed in v2.0.
+> **Deprecated format:** The flat `crossCheckExtractor` / `onCrossCheckFailed` fields still work but emit a deprecation warning. Deprecated since v0.10.0; planned removal in v0.12.0.
+
+### Deprecation Policy
+
+Deprecated public APIs are marked with `@deprecated` JSDoc and listed in the changelog. Unless a security issue requires faster removal, deprecated APIs are planned for removal two minor versions later or at the next major release, whichever comes first.
 
 ## OpenTelemetry Integration
 

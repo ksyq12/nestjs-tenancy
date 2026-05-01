@@ -1,6 +1,6 @@
 {
   "name": "@nestarc/tenancy",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Multi-tenancy module for NestJS with PostgreSQL Row Level Security (RLS) and Prisma support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
