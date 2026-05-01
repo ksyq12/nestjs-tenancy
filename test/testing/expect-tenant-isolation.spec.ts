@@ -52,12 +52,12 @@ describe('expectTenantIsolation', () => {
     ).rejects.toThrow('Tenant isolation violation');
   });
 
-  it('should pass when both tenants return empty results', async () => {
+  it('should throw when both tenants return empty results', async () => {
     const model = createMockModel({});
 
     await expect(
       expectTenantIsolation(model, 'tenant-a', 'tenant-b'),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow('both tenants returned 0 rows');
   });
 
   it('should throw when a third-party tenant leaks into results', async () => {

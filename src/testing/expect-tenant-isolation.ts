@@ -35,6 +35,13 @@ export async function expectTenantIsolation(
     withTenant(tenantB, () => prismaModel.findMany()),
   ]);
 
+  if (rowsA.length === 0 && rowsB.length === 0) {
+    throw new Error(
+      `expectTenantIsolation: both tenants returned 0 rows. ` +
+      `Seed test data for tenants ${tenantA} and ${tenantB} before asserting isolation.`,
+    );
+  }
+
   // Verify all rows belong to the querying tenant (catches third-party leaks too)
   const foreignInA = rowsA.filter((r: Record<string, unknown>) => r[field] !== tenantA);
   const foreignInB = rowsB.filter((r: Record<string, unknown>) => r[field] !== tenantB);

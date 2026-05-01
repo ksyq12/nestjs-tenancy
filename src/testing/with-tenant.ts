@@ -29,13 +29,5 @@ export async function withTenant<T>(
   context?: TenancyContext,
 ): Promise<T> {
   const ctx = context ?? new TenancyContext();
-  return new Promise<T>((resolve, reject) => {
-    ctx.run(tenantId, async () => {
-      try {
-        resolve(await callback());
-      } catch (e) {
-        reject(e);
-      }
-    });
-  });
+  return ctx.run(tenantId, callback);
 }

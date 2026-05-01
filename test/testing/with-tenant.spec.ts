@@ -13,6 +13,15 @@ describe('withTenant', () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
+  it('should resolve the value returned by TenancyContext.run', async () => {
+    const context = {
+      run: jest.fn(() => 'run-result'),
+    } as unknown as TenancyContext;
+
+    await expect(withTenant('tenant-1', () => 'callback-result', context)).resolves.toBe('run-result');
+    expect(context.run).toHaveBeenCalledWith('tenant-1', expect.any(Function));
+  });
+
   it('should handle async callbacks', async () => {
     const result = await withTenant('tenant-1', async () => {
       await new Promise((r) => setTimeout(r, 5));

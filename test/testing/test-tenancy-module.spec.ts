@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { Injectable } from '@nestjs/common';
 import { TenancyService } from '../../src/services/tenancy.service';
 import { TenancyContext } from '../../src/services/tenancy-context';
+import { TENANCY_MODULE_OPTIONS } from '../../src/tenancy.constants';
 import { TestTenancyModule } from '../../src/testing/test-tenancy.module';
 import { withTenant } from '../../src/testing/with-tenant';
 
@@ -32,6 +33,26 @@ describe('TestTenancyModule', () => {
 
     const context = module.get(TenancyContext);
     expect(context).toBeDefined();
+  });
+
+  it('should provide default tenancy module options', async () => {
+    const module = await Test.createTestingModule({
+      imports: [TestTenancyModule.register()],
+    }).compile();
+
+    expect(module.get(TENANCY_MODULE_OPTIONS)).toEqual({
+      tenantExtractor: 'X-Tenant-Id',
+    });
+  });
+
+  it('should allow overriding tenancy module options', async () => {
+    const module = await Test.createTestingModule({
+      imports: [TestTenancyModule.register({ tenantExtractor: 'X-Org-Id' })],
+    }).compile();
+
+    expect(module.get(TENANCY_MODULE_OPTIONS)).toEqual({
+      tenantExtractor: 'X-Org-Id',
+    });
   });
 
   it('should allow injecting TenancyService into other services', async () => {

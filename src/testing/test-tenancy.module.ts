@@ -1,6 +1,14 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import { TenancyContext } from '../services/tenancy-context';
 import { TenancyService } from '../services/tenancy.service';
+import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
+import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
+
+export type TestTenancyModuleOptions = Partial<TenancyModuleOptions>;
+
+const DEFAULT_TEST_TENANCY_OPTIONS: TenancyModuleOptions = {
+  tenantExtractor: 'X-Tenant-Id',
+};
 
 /**
  * A lightweight test module that provides TenancyContext and TenancyService
@@ -20,12 +28,22 @@ import { TenancyService } from '../services/tenancy.service';
  */
 @Module({})
 export class TestTenancyModule {
-  static register(): DynamicModule {
+  static register(options: TestTenancyModuleOptions = {}): DynamicModule {
+    const tenancyOptions: TenancyModuleOptions = {
+      ...DEFAULT_TEST_TENANCY_OPTIONS,
+      ...options,
+      tenantExtractor: options.tenantExtractor ?? DEFAULT_TEST_TENANCY_OPTIONS.tenantExtractor,
+    };
+
     return {
       module: TestTenancyModule,
       global: true,
-      providers: [TenancyContext, TenancyService],
-      exports: [TenancyContext, TenancyService],
+      providers: [
+        { provide: TENANCY_MODULE_OPTIONS, useValue: tenancyOptions },
+        TenancyContext,
+        TenancyService,
+      ],
+      exports: [TENANCY_MODULE_OPTIONS, TenancyContext, TenancyService],
     };
   }
 }
