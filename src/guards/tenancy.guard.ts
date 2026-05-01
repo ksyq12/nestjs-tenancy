@@ -20,6 +20,8 @@ export class TenancyGuard implements CanActivate {
   ) {}
 
   canActivate(executionContext: ExecutionContext): boolean {
+    // TenancyGuard enforces tenant presence for HTTP only. RPC transports
+    // restore tenant context via TenantContextInterceptor before handlers run.
     if (executionContext.getType() !== 'http') {
       return true;
     }
