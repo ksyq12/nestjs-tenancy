@@ -26,8 +26,23 @@ describe('TenancyContextRequiredError', () => {
     expect(error).toBeInstanceOf(Error);
   });
 
+  it('should restore its subclass prototype chain explicitly', () => {
+    const error = new TenancyContextRequiredError('User', 'findMany');
+    expect(Object.getPrototypeOf(error)).toBe(TenancyContextRequiredError.prototype);
+  });
+
   it('should be an instance of TenantContextMissingError', () => {
     const error = new TenancyContextRequiredError('User', 'findMany');
     expect(error).toBeInstanceOf(TenantContextMissingError);
+  });
+
+  it('should serialize structured fields including message', () => {
+    const error = new TenancyContextRequiredError('Order', 'create');
+    expect(error.toJSON()).toEqual({
+      name: 'TenancyContextRequiredError',
+      message: error.message,
+      model: 'Order',
+      operation: 'create',
+    });
   });
 });

@@ -22,6 +22,27 @@ describe('TenantContextMissingError', () => {
     expect(error).toBeInstanceOf(Error);
   });
 
+  it('should restore its prototype chain explicitly', () => {
+    const error = new TenantContextMissingError();
+    expect(Object.getPrototypeOf(error)).toBe(TenantContextMissingError.prototype);
+  });
+
+  it('should capture stack trace with the concrete constructor when available', () => {
+    const captureStackTrace = jest
+      .spyOn(
+        Error as ErrorConstructor & {
+          captureStackTrace: (targetObject: object, constructorOpt?: Function) => void;
+        },
+        'captureStackTrace',
+      )
+      .mockImplementation(() => undefined);
+
+    const error = new TenantContextMissingError();
+
+    expect(captureStackTrace).toHaveBeenCalledWith(error, TenantContextMissingError);
+    captureStackTrace.mockRestore();
+  });
+
   it('should be parent of TenancyContextRequiredError', () => {
     const error = new TenancyContextRequiredError('User', 'findMany');
     expect(error).toBeInstanceOf(TenantContextMissingError);

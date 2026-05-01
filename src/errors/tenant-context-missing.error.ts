@@ -15,10 +15,19 @@
  * }
  * ```
  */
+type ErrorConstructorWithCaptureStackTrace = ErrorConstructor & {
+  captureStackTrace?: (targetObject: object, constructorOpt?: Function) => void;
+};
+
 export class TenantContextMissingError extends Error {
   public override name = 'TenantContextMissingError';
 
   constructor(message?: string) {
     super(message ?? 'No tenant context available');
+
+    Object.setPrototypeOf(this, new.target.prototype);
+
+    const captureStackTrace = (Error as ErrorConstructorWithCaptureStackTrace).captureStackTrace;
+    captureStackTrace?.(this, new.target);
   }
 }

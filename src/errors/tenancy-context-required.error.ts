@@ -1,6 +1,8 @@
 import { TenantContextMissingError } from './tenant-context-missing.error';
 
 export class TenancyContextRequiredError extends TenantContextMissingError {
+  public override name = 'TenancyContextRequiredError';
+
   constructor(
     public readonly model: string,
     public readonly operation: string,
@@ -10,6 +12,14 @@ export class TenancyContextRequiredError extends TenantContextMissingError {
       `Model: ${model}, Operation: ${operation}. ` +
       `Use withoutTenant() to explicitly bypass, or add '${model}' to sharedModels.`,
     );
-    this.name = 'TenancyContextRequiredError';
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      model: this.model,
+      operation: this.operation,
+    };
   }
 }
