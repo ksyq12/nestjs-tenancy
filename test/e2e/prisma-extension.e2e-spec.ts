@@ -92,12 +92,10 @@ describe('Prisma Extension + RLS Integration', () => {
     expect(rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
   });
 
-  it('should return no rows without tenant context (RLS blocks)', async () => {
-    // No context.run — getCurrentTenant() returns null — query passes through
-    // RLS policy: tenant_id = current_setting('app.current_tenant', true)
-    // With no setting, current_setting returns '' which matches no rows
-    const rows = await prisma.user.findMany();
-    expect(rows).toHaveLength(0);
+  it('should throw without tenant context by default', async () => {
+    await expect(prisma.user.findMany()).rejects.toThrow(
+      'Tenancy context is required',
+    );
   });
 
   it('should skip set_config when using withoutTenant()', async () => {
@@ -106,7 +104,7 @@ describe('Prisma Extension + RLS Integration', () => {
     });
 
     // withoutTenant() makes tenantId null, extension skips set_config
-    // RLS still applies (app_user role) — empty current_setting matches no rows
+    // RLS still applies (app_user role) — NULL current_setting matches no rows
     expect(rows).toHaveLength(0);
   });
 

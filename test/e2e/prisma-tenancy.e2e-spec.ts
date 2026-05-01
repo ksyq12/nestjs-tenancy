@@ -255,7 +255,7 @@ describe('RLS Bypass Attempts', () => {
   });
 
   it('should enforce FORCE ROW LEVEL SECURITY on app_user role', async () => {
-    // Without SET LOCAL, current_setting returns empty — RLS blocks all rows
+    // Without SET LOCAL, current_setting returns NULL — RLS blocks all rows
     const result = await client.query('SELECT * FROM users');
     expect(result.rows).toHaveLength(0);
 

@@ -5,6 +5,7 @@ import { parseModels, ParsedModel } from './prisma-schema-parser';
 interface CheckOptions {
   cwd?: string;
   dbSettingKey?: string;
+  tenantIdField?: string;
 }
 
 const GENERATED_START = '-- BEGIN GENERATED TENANCY SQL';
@@ -44,6 +45,10 @@ function stripSqlLineComments(sqlContent: string): string {
     .join('\n');
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Compares the Prisma schema models against an existing tenancy-setup.sql file
  * to detect drift: missing tables, extra tables, and incomplete policy definitions.
@@ -51,6 +56,7 @@ function stripSqlLineComments(sqlContent: string): string {
 export function runCheck(options?: CheckOptions): CheckResult {
   const cwd = options?.cwd ?? process.cwd();
   const expectedKey = options?.dbSettingKey ?? 'app.current_tenant';
+  const tenantIdField = options?.tenantIdField ?? 'tenant_id';
 
   const schemaPath = findSchemaFile(cwd);
   if (!schemaPath) {
@@ -144,6 +150,16 @@ export function runCheck(options?: CheckOptions): CheckResult {
       warnings.push(`${table}: missing tenant_insert policy`);
     }
 
+    // Check tenant column index. RLS policies are implicit filters, so tenant
+    // scoped tables should index the policy column to avoid full table scans.
+    const escapedTenantField = escapeRegExp(tenantIdField);
+    const tenantIndexRegex = new RegExp(
+      `CREATE\\s+(?:UNIQUE\\s+)?INDEX(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+\\S+\\s+ON\\s+${escapedTable}\\s+(?:USING\\s+\\w+\\s+)?\\([^)]*\\b${escapedTenantField}\\b`,
+      'i',
+    );
+    if (!tenantIndexRegex.test(generatedSql)) {
+      warnings.push(`${table}: missing tenant index on ${tenantIdField}`);
+    }
   }
 
   // Check setting key consistency across ALL current_setting() calls

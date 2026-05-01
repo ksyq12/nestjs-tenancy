@@ -68,7 +68,7 @@ Measured extension overhead: **+0.115ms avg (+4.0%)**, **+0.127ms p95** compared
 - Node.js >= 18
 - NestJS 10 or 11
 - Prisma 5 or 6
-- PostgreSQL (with RLS support)
+- PostgreSQL (with RLS support). Use a patched minor release: CVE-2024-10976 is fixed in PostgreSQL 17.1, 16.5, 15.9, 14.14, 13.17, and 12.21.
 
 ## Installation
 
@@ -90,12 +90,15 @@ ALTER TABLE users ADD COLUMN tenant_id TEXT NOT NULL;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE users FORCE ROW LEVEL SECURITY;
 
+-- Add an index for the policy column to avoid full table scans
+CREATE INDEX IF NOT EXISTS tenancy_users_tenant_id_idx ON users (tenant_id);
+
 -- Create isolation policy
 CREATE POLICY tenant_isolation ON users
   USING (tenant_id = current_setting('app.current_tenant', true)::text);
 
--- The `true` parameter means missing_ok: returns '' instead of error when unset.
--- This ensures queries without tenant context return 0 rows (not an error).
+-- The `true` parameter means missing_ok: returns NULL instead of error when unset.
+-- At the database layer, queries without tenant context return 0 rows (not an error).
 -- Repeat for each tenant-scoped table
 ```
 
@@ -163,12 +166,14 @@ createPrismaTenancyExtension(tenancyService, {
 | `autoInjectTenantId` | `boolean` | `false` | Auto-inject tenant ID into `create`, `createMany`, `createManyAndReturn`, `upsert` |
 | `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
-| `failClosed` | `boolean` | `false` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
+| `failClosed` | `boolean` | `true` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
 | `interactiveTransactionSupport` | `boolean` | `false` | Enable transparent `set_config` inside interactive transactions. Validates Prisma compatibility at startup — throws immediately if unsupported. Alternative: `tenancyTransaction()` helper |
 
 > **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
 
 > **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Enable `interactiveTransactionSupport: true` for transparent handling, or use the `tenancyTransaction()` helper. See [Interactive Transactions](#interactive-transactions) below.
+
+> **Migration note:** If you intentionally rely on model queries without tenant context falling through to PostgreSQL RLS, set `failClosed: false` explicitly. Prefer `sharedModels`, `withoutTenant()`, or a separate admin client for intentional unscoped access.
 
 ### Interactive Transactions
 
@@ -307,7 +312,7 @@ export class HealthController {
 
 ### Programmatic Bypass
 
-Use `withoutTenant()` to clear the tenant context so the Prisma extension skips `set_config()`. With RLS enabled, this means queries return **0 rows** — RLS blocks access when no tenant session variable is set.
+Use `withoutTenant()` to clear the tenant context so the Prisma extension skips `set_config()`. With RLS enabled, this means queries return **0 rows** — `current_setting(..., true)` returns `NULL`, so the equality policy does not match any tenant row.
 
 ```typescript
 // Background job — clears tenant context, Prisma extension skips set_config()
@@ -348,7 +353,7 @@ CREATE POLICY admin_bypass ON users
 @BypassTenancy()
 async getAllUsers() {
   // With X-Tenant-Id header: returns that tenant's data
-  // Without X-Tenant-Id header: returns 0 rows (RLS blocks)
+  // Without X-Tenant-Id header: throws TenancyContextRequiredError by default
   // For true cross-tenant access, use withoutTenant() + admin connection
   return this.prisma.user.findMany();
 }
@@ -534,12 +539,12 @@ TenancyModule.forRoot({
 
 ## Fail-Closed Mode
 
-By default, model queries without a tenant context pass through silently. Enable `failClosed` to block them:
+By default, model queries without a tenant context throw `TenancyContextRequiredError`. This avoids silent unscoped query paths when RLS is misconfigured or accidentally bypassed.
 
 ```typescript
 const prisma = new PrismaClient().$extends(
   createPrismaTenancyExtension(tenancyService, {
-    failClosed: true, // throws TenancyContextRequiredError if no tenant
+    failClosed: true, // default
   })
 );
 ```
@@ -547,6 +552,16 @@ const prisma = new PrismaClient().$extends(
 Queries are still allowed when:
 - The model is listed in `sharedModels`
 - `withoutTenant()` is used (explicit bypass)
+
+To restore the previous pass-through behavior, opt out explicitly:
+
+```typescript
+const prisma = new PrismaClient().$extends(
+  createPrismaTenancyExtension(tenancyService, {
+    failClosed: false,
+  })
+);
+```
 
 > **Scope**: `failClosed` applies to Prisma **model operations** (`findMany`, `create`, `update`, etc.). Raw queries (`$queryRaw`, `$executeRaw`) bypass the extension and are **not** covered — use parameterized `set_config()` manually for raw queries.
 
@@ -793,6 +808,14 @@ try {
 - **Transaction-scoped**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL` — scoped to the batch transaction. No cross-request leakage via connection pool.
 - **Custom validators**: If your tenant IDs are not UUIDs, provide a `validateTenantId` function that rejects any unsafe input.
 
+### RLS Operational Notes
+
+- **Patch PostgreSQL**: Use a currently supported PostgreSQL minor release. CVE-2024-10976 affects row-security policies in older 17.x, 16.x, 15.x, 14.x, 13.x, and 12.x patch releases.
+- **Index the tenant column**: RLS policies behave like implicit filters. Add an index on `tenant_id` (or your configured tenant column) for every tenant-scoped table. The CLI now generates this index and `tenancy check` warns when it is missing.
+- **Keep policies simple**: The generated policy is a direct equality check. If you replace it with subqueries or non-leakproof functions, validate query plans under realistic data volume.
+- **RLS is not resource isolation**: It does not prevent noisy-neighbor CPU/IO issues, cache key leaks, or cross-tenant data in Redis/search queues. Include tenant IDs in non-database cache keys and job payloads.
+- **PgBouncer/Prisma**: Prisma requires PgBouncer transaction mode, and prepared-statement settings depend on your PgBouncer version. Test RLS behavior with the same pooler mode used in production.
+
 ### Security Considerations
 
 **Tenant ID is client-supplied by default.** The built-in extractors (Header, Subdomain, Path) read tenant identifiers directly from the request without verifying the caller's authorization to access that tenant.
@@ -826,7 +849,7 @@ npx @nestarc/tenancy init
 ```
 
 This generates:
-- `tenancy-setup.sql` — PostgreSQL RLS policies, roles, and grants
+- `tenancy-setup.sql` — PostgreSQL RLS policies, tenant indexes, roles, and grants
 - `tenancy.module-setup.ts` — NestJS module registration code
 
 Preview without writing files:
@@ -843,7 +866,7 @@ npx @nestarc/tenancy check
 npx @nestarc/tenancy check --db-setting-key=custom.tenant_key
 ```
 
-Validates table coverage, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency across all policies. Exits with code 0 (in sync) or 1 (drift detected).
+Validates table coverage, tenant indexes, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency across all policies. Exits with code 0 (in sync) or 1 (drift detected).
 
 ## License
 

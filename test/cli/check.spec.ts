@@ -186,6 +186,7 @@ model User {
       'ALTER TABLE "User" -- operator note',
       '  ENABLE ROW LEVEL SECURITY;',
       'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+      'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);',
       "CREATE POLICY tenant_isolation_User ON \"User\"",
       "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
       "CREATE POLICY tenant_insert_User ON \"User\"",
@@ -223,6 +224,7 @@ model User {
       const sql = [
         'ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;',
         // Missing: ALTER TABLE "User" FORCE ROW LEVEL SECURITY;
+        'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);',
         "CREATE POLICY tenant_isolation_User ON \"User\"",
         "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
         "CREATE POLICY tenant_insert_User ON \"User\"",
@@ -248,6 +250,7 @@ model User {
       const sql = [
         'ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;',
         'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);',
         // Missing: CREATE POLICY tenant_isolation_User
         "CREATE POLICY tenant_insert_User ON \"User\"",
         "  FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);",
@@ -272,6 +275,7 @@ model User {
       const sql = [
         'ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;',
         'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);',
         "CREATE POLICY tenant_isolation_User ON \"User\"",
         "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
         // Missing: CREATE POLICY tenant_insert_User
@@ -282,6 +286,31 @@ model User {
       expect(result.inSync).toBe(false);
       expect(result.warnings).toContainEqual(
         expect.stringContaining('tenant_insert'),
+      );
+    });
+
+    it('should warn when tenant index is missing', () => {
+      writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+      `);
+
+      const sql = [
+        'ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;',
+        'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+        "CREATE POLICY tenant_isolation_User ON \"User\"",
+        "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
+        "CREATE POLICY tenant_insert_User ON \"User\"",
+        "  FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);",
+      ].join('\n');
+      writeSql(sql);
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(false);
+      expect(result.warnings).toContainEqual(
+        expect.stringContaining('missing tenant index'),
       );
     });
 
@@ -324,12 +353,14 @@ model Post {
       const sql = [
         'ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;',
         'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);',
         "CREATE POLICY tenant_isolation_User ON \"User\"",
         "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
         "CREATE POLICY tenant_insert_User ON \"User\"",
         "  FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);",
         'ALTER TABLE "Post" ENABLE ROW LEVEL SECURITY;',
         'ALTER TABLE "Post" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX IF NOT EXISTS tenancy_Post_tenant_id_idx ON "Post" (tenant_id);',
         "CREATE POLICY tenant_isolation_Post ON \"Post\"",
         "  USING (tenant_id = current_setting('app.wrong_key', true)::text);",
         "CREATE POLICY tenant_insert_Post ON \"Post\"",

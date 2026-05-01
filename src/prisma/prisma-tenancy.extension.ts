@@ -39,7 +39,7 @@ export interface PrismaTenancyExtensionOptions {
    * `withoutTenant()` was used to explicitly bypass).
    *
    * Prevents accidental data exposure when RLS policies are misconfigured.
-   * @default false
+   * @default true
    */
   failClosed?: boolean;
   /**
@@ -78,6 +78,7 @@ export interface PrismaTenancyExtensionOptions {
  * - `autoInjectTenantId`: Automatically inject tenant ID into write operations
  * - `tenantIdField`: Field name to inject tenant ID into (default: tenant_id)
  * - `sharedModels`: Models that are shared across tenants (skips RLS and injection)
+ * - `failClosed`: Throw when model queries run without tenant context (default: true)
  *
  * **Interactive transactions:**
  * By default, the batch `$transaction([set_config, query])` does not propagate into
@@ -100,7 +101,7 @@ export function createPrismaTenancyExtension(
   const sharedModels = new Set(options?.sharedModels ?? []);
   const autoInject = options?.autoInjectTenantId ?? false;
   const tenantIdField = options?.tenantIdField ?? 'tenant_id';
-  const failClosedMode = options?.failClosed ?? false;
+  const failClosedMode = options?.failClosed ?? true;
 
   const itxSupport = options?.interactiveTransactionSupport === true;
 

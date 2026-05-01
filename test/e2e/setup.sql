@@ -26,6 +26,7 @@ GRANT USAGE, SELECT ON SEQUENCE users_id_seq TO app_user;
 
 -- Enable RLS (applies to non-superuser roles)
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS tenancy_users_tenant_id_idx ON users (tenant_id);
 
 -- Create isolation policies (DROP IF EXISTS for idempotency)
 DROP POLICY IF EXISTS tenant_isolation ON users;

@@ -50,6 +50,7 @@ describe('generateSetupSql', () => {
     expect(sql).toContain('CREATE POLICY tenant_isolation_User ON "User"');
     expect(sql).toContain("current_setting('app.current_tenant', true)::text");
     expect(sql).toContain('CREATE POLICY tenant_insert_User ON "User"');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);');
     expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "User" TO app_user;');
   });
 
@@ -85,6 +86,7 @@ describe('generateSetupSql', () => {
     expect(sql).toContain('-- Country (shared model)');
     expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "Country" TO app_user;');
     expect(sql).not.toContain('ENABLE ROW LEVEL SECURITY');
+    expect(sql).not.toContain('CREATE INDEX IF NOT EXISTS tenancy_Country_tenant_id_idx');
   });
 
   it('should handle a mix of shared and non-shared models', () => {
@@ -117,6 +119,7 @@ describe('generateSetupSql', () => {
     };
     const sql = generateSetupSql(options);
     expect(sql).toContain('org_id = current_setting');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_orders_org_id_idx ON "orders" (org_id);');
   });
 
   it('should sanitize hyphenated table names in policy identifiers', () => {
@@ -144,6 +147,7 @@ describe('generateSetupSql', () => {
       expect(sql).toContain('ALTER TABLE "auth"."users" FORCE ROW LEVEL SECURITY;');
       expect(sql).toContain('CREATE POLICY tenant_isolation_auth_users ON "auth"."users"');
       expect(sql).toContain('CREATE POLICY tenant_insert_auth_users ON "auth"."users"');
+      expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_auth_users_tenant_id_idx ON "auth"."users" (tenant_id);');
       expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "auth"."users" TO app_user;');
     });
 

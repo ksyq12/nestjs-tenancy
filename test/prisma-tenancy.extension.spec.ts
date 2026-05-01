@@ -52,8 +52,11 @@ describe('createPrismaTenancyExtension', () => {
     return { mockPrisma, mockTransaction, mockExecuteRaw };
   }
 
-  function getHandler(mockPrisma: any) {
-    createPrismaTenancyExtension(service);
+  function getHandler(
+    mockPrisma: any,
+    opts?: Partial<PrismaTenancyExtensionOptions>,
+  ) {
+    createPrismaTenancyExtension(service, opts);
     expect(capturedFactory).not.toBeNull();
 
     const extensionConfig = capturedFactory!(mockPrisma);
@@ -76,21 +79,22 @@ describe('createPrismaTenancyExtension', () => {
     expect(capturedFactory).not.toBeNull();
   });
 
-  it('should pass through query when no tenant context', async () => {
+  it('should throw by default when no tenant context', async () => {
     const { mockPrisma, mockTransaction } = buildMockPrisma();
     const handler = getHandler(mockPrisma);
 
     const mockQuery = jest.fn().mockResolvedValue([{ id: 1 }]);
-    const result = await handler({
-      model: 'TestModel',
-      operation: 'findMany',
-      args: { where: { id: 1 } },
-      query: mockQuery,
-    });
+    await expect(
+      handler({
+        model: 'TestModel',
+        operation: 'findMany',
+        args: { where: { id: 1 } },
+        query: mockQuery,
+      }),
+    ).rejects.toThrow(TenancyContextRequiredError);
 
-    expect(mockQuery).toHaveBeenCalledWith({ where: { id: 1 } });
+    expect(mockQuery).not.toHaveBeenCalled();
     expect(mockTransaction).not.toHaveBeenCalled();
-    expect(result).toEqual([{ id: 1 }]);
   });
 
   it('should wrap in batch transaction when tenant exists', async () => {
@@ -699,9 +703,9 @@ describe('createPrismaTenancyExtension', () => {
       });
     });
 
-    it('should NOT throw when failClosed is false (default)', async () => {
+    it('should NOT throw when failClosed is explicitly false', async () => {
       const { mockPrisma } = buildMockPrisma();
-      const handler = getHandler(mockPrisma);
+      const handler = getHandler(mockPrisma, { failClosed: false });
       const mockQuery = jest.fn().mockResolvedValue([{ id: 1 }]);
 
       const result = await handler({

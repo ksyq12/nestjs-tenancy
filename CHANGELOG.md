@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed (Breaking)
+
+- **Prisma extension fail-closed by default** — `createPrismaTenancyExtension()` now treats `failClosed` as `true` when omitted. Model operations without tenant context throw `TenancyContextRequiredError` unless the model is listed in `sharedModels` or the call runs inside `withoutTenant()`. Set `failClosed: false` explicitly to keep the previous pass-through behavior.
+
 ## [0.10.1] - 2026-04-08
 
 ### Added
