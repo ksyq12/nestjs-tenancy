@@ -7,8 +7,9 @@ import {
 import { Reflector } from '@nestjs/core';
 import { TenancyContext } from '../services/tenancy-context';
 import { TenancyEventService } from '../events/tenancy-event.service';
-import { TenancyEvents } from '../events/tenancy-events';
+import { summarizeTenancyRequest, TenancyEvents } from '../events/tenancy-events';
 import { BYPASS_TENANCY_KEY } from '../tenancy.constants';
+import { TenancyRequest } from '../interfaces/tenancy-request.interface';
 
 @Injectable()
 export class TenancyGuard implements CanActivate {
@@ -28,7 +29,11 @@ export class TenancyGuard implements CanActivate {
       [executionContext.getHandler(), executionContext.getClass()],
     );
     if (isBypassed) {
-      this.eventService.emit(TenancyEvents.CONTEXT_BYPASSED, { reason: 'decorator' });
+      const request = executionContext.switchToHttp().getRequest<TenancyRequest>();
+      this.eventService.emit(TenancyEvents.CONTEXT_BYPASSED, {
+        reason: 'decorator',
+        requestSummary: summarizeTenancyRequest(request),
+      });
       return true;
     }
 

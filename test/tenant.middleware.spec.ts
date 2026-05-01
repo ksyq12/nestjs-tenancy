@@ -30,7 +30,13 @@ function createMiddleware(
   );
 }
 
-const mockReq = (headers: Record<string, string> = {}) => ({ headers }) as any;
+const mockReq = (headers: Record<string, string> = {}, overrides: Record<string, unknown> = {}) => ({
+  headers,
+  method: 'GET',
+  path: '/users',
+  ip: '127.0.0.1',
+  ...overrides,
+}) as any;
 const mockRes = () => ({}) as any;
 
 describe('TenantMiddleware', () => {
@@ -332,8 +338,14 @@ describe('TenantMiddleware', () => {
         expect.objectContaining({
           extractedTenantId: VALID_UUID,
           crossCheckTenantId: OTHER_UUID,
+          requestSummary: {
+            method: 'GET',
+            path: '/users',
+            ip: '127.0.0.1',
+          },
         }),
       );
+      expect(eventService.emit.mock.calls[0][1]).not.toHaveProperty('request');
     });
   });
 
@@ -488,8 +500,16 @@ describe('TenantMiddleware', () => {
       mw.use(req, mockRes(), () => {
         expect(eventService.emit).toHaveBeenCalledWith(
           TenancyEvents.RESOLVED,
-          expect.objectContaining({ tenantId: '550e8400-e29b-41d4-a716-446655440000', request: req }),
+          expect.objectContaining({
+            tenantId: '550e8400-e29b-41d4-a716-446655440000',
+            requestSummary: {
+              method: 'GET',
+              path: '/users',
+              ip: '127.0.0.1',
+            },
+          }),
         );
+        expect(eventService.emit.mock.calls[0][1]).not.toHaveProperty('request');
         done();
       });
     });
@@ -502,8 +522,15 @@ describe('TenantMiddleware', () => {
       mw.use(req, mockRes(), () => {
         expect(eventService.emit).toHaveBeenCalledWith(
           TenancyEvents.NOT_FOUND,
-          expect.objectContaining({ request: req }),
+          expect.objectContaining({
+            requestSummary: {
+              method: 'GET',
+              path: '/users',
+              ip: '127.0.0.1',
+            },
+          }),
         );
+        expect(eventService.emit.mock.calls[0][1]).not.toHaveProperty('request');
         done();
       });
     });
@@ -520,8 +547,16 @@ describe('TenantMiddleware', () => {
 
       expect(eventService.emit).toHaveBeenCalledWith(
         TenancyEvents.VALIDATION_FAILED,
-        expect.objectContaining({ tenantId: 'invalid' }),
+        expect.objectContaining({
+          tenantId: 'invalid',
+          requestSummary: {
+            method: 'GET',
+            path: '/users',
+            ip: '127.0.0.1',
+          },
+        }),
       );
+      expect(eventService.emit.mock.calls[0][1]).not.toHaveProperty('request');
     });
   });
 });

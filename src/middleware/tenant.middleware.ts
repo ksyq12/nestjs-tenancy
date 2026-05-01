@@ -11,7 +11,7 @@ import { TenancyModuleOptions } from '../interfaces/tenancy-module-options.inter
 import { TenantExtractor } from '../interfaces/tenant-extractor.interface';
 import { TenancyContext } from '../services/tenancy-context';
 import { TenancyEventService } from '../events/tenancy-event.service';
-import { TenancyEvents } from '../events/tenancy-events';
+import { summarizeTenancyRequest, TenancyEvents } from '../events/tenancy-events';
 import { HeaderTenantExtractor } from '../extractors/header.extractor';
 import { TenancyTelemetryService } from '../telemetry/tenancy-telemetry.service';
 import { TENANCY_MODULE_OPTIONS, UUID_REGEX } from '../tenancy.constants';
@@ -61,10 +61,11 @@ export class TenantMiddleware implements NestMiddleware {
   }
 
   async use(req: TenancyRequest, _res: TenancyResponse, next: (error?: any) => void): Promise<void> {
+    const requestSummary = summarizeTenancyRequest(req);
     const tenantId = await this.extractor.extract(req);
 
     if (!tenantId) {
-      this.eventService.emit(TenancyEvents.NOT_FOUND, { request: req });
+      this.eventService.emit(TenancyEvents.NOT_FOUND, { requestSummary });
       const result = await this.options.onTenantNotFound?.(req, _res);
       if (result !== 'skip') {
         next();
@@ -74,7 +75,7 @@ export class TenantMiddleware implements NestMiddleware {
 
     const isValid = await this.validate(tenantId);
     if (!isValid) {
-      this.eventService.emit(TenancyEvents.VALIDATION_FAILED, { tenantId, request: req });
+      this.eventService.emit(TenancyEvents.VALIDATION_FAILED, { tenantId, requestSummary });
       throw new BadRequestException('Invalid tenant ID format');
     }
 
@@ -88,7 +89,7 @@ export class TenantMiddleware implements NestMiddleware {
         this.eventService.emit(TenancyEvents.CROSS_CHECK_FAILED, {
           extractedTenantId: tenantId,
           crossCheckTenantId: crossCheckId,
-          request: req,
+          requestSummary,
         });
         if (this.onCrossCheckFailed === 'reject') {
           throw new ForbiddenException('Tenant ID mismatch');
@@ -104,7 +105,7 @@ export class TenantMiddleware implements NestMiddleware {
       const span = this.telemetryService.startSpan('tenant.resolved');
       try {
         await this.options.onTenantResolved?.(tenantId, req);
-        this.eventService.emit(TenancyEvents.RESOLVED, { tenantId, request: req });
+        this.eventService.emit(TenancyEvents.RESOLVED, { tenantId, requestSummary });
         next();
       } finally {
         this.telemetryService.endSpan(span);

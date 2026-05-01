@@ -5,12 +5,22 @@ import { TenancyContext } from '../src/services/tenancy-context';
 import { TenancyEventService } from '../src/events/tenancy-event.service';
 import { TenancyEvents } from '../src/events/tenancy-events';
 
-function createMockContext(type: string = 'http', handler: Function = () => {}, classRef: Function = class {}): ExecutionContext {
+function createMockContext(
+  type: string = 'http',
+  handler: Function = () => {},
+  classRef: Function = class {},
+  request: Record<string, unknown> = {
+    headers: { 'user-agent': 'jest' },
+    method: 'GET',
+    path: '/health',
+    ip: '127.0.0.1',
+  },
+): ExecutionContext {
   return {
     getType: () => type,
     getHandler: () => handler,
     getClass: () => classRef,
-    switchToHttp: () => ({ getRequest: () => ({}) }),
+    switchToHttp: () => ({ getRequest: () => request }),
   } as any;
 }
 
@@ -60,7 +70,15 @@ describe('TenancyGuard', () => {
     guard.canActivate(createMockContext());
     expect(eventService.emit).toHaveBeenCalledWith(
       TenancyEvents.CONTEXT_BYPASSED,
-      { reason: 'decorator' },
+      {
+        reason: 'decorator',
+        requestSummary: {
+          method: 'GET',
+          path: '/health',
+          ip: '127.0.0.1',
+          userAgent: 'jest',
+        },
+      },
     );
   });
 

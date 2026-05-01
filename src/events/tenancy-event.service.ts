@@ -1,5 +1,6 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { TenancyEventMap } from './tenancy-events';
 
 /**
@@ -11,7 +12,8 @@ import { TenancyEventMap } from './tenancy-events';
  */
 @Injectable()
 export class TenancyEventService implements OnModuleInit {
-  private emitter: { emit: (event: string, ...values: any[]) => boolean } | null = null;
+  private readonly logger = new Logger(TenancyEventService.name);
+  private emitter: Pick<EventEmitter2, 'emit'> | null = null;
 
   constructor(private readonly moduleRef: ModuleRef) {}
 
@@ -27,6 +29,13 @@ export class TenancyEventService implements OnModuleInit {
   }
 
   emit<K extends keyof TenancyEventMap>(event: K, payload: TenancyEventMap[K]): void {
-    this.emitter?.emit(event, payload);
+    try {
+      this.emitter?.emit(event as string, payload);
+    } catch (err) {
+      this.logger.error(
+        `Tenancy event listener failed for "${String(event)}"`,
+        err instanceof Error ? err.stack : undefined,
+      );
+    }
   }
 }

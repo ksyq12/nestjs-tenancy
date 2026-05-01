@@ -18,11 +18,16 @@ describe('TenancyEventService integration with @nestjs/event-emitter', () => {
     const received: any[] = [];
     emitter.on(TenancyEvents.RESOLVED, (payload: any) => received.push(payload));
 
-    const req = { headers: {} };
-    service.emit(TenancyEvents.RESOLVED, { tenantId: 'test-tenant', request: req });
+    service.emit(TenancyEvents.RESOLVED, {
+      tenantId: 'test-tenant',
+      requestSummary: { method: 'GET', path: '/users' },
+    });
 
     expect(received).toHaveLength(1);
-    expect(received[0]).toEqual({ tenantId: 'test-tenant', request: req });
+    expect(received[0]).toEqual({
+      tenantId: 'test-tenant',
+      requestSummary: { method: 'GET', path: '/users' },
+    });
 
     await module.close();
   });
@@ -43,9 +48,9 @@ describe('TenancyEventService integration with @nestjs/event-emitter', () => {
     emitter.on(TenancyEvents.RESOLVED, (p: any) => resolved.push(p));
     emitter.on(TenancyEvents.NOT_FOUND, (p: any) => notFound.push(p));
 
-    service.emit(TenancyEvents.RESOLVED, { tenantId: 'a', request: { headers: {} } });
-    service.emit(TenancyEvents.NOT_FOUND, { request: { headers: {} } });
-    service.emit(TenancyEvents.RESOLVED, { tenantId: 'b', request: { headers: {} } });
+    service.emit(TenancyEvents.RESOLVED, { tenantId: 'a' });
+    service.emit(TenancyEvents.NOT_FOUND, {});
+    service.emit(TenancyEvents.RESOLVED, { tenantId: 'b' });
 
     expect(resolved).toHaveLength(2);
     expect(notFound).toHaveLength(1);
@@ -63,7 +68,7 @@ describe('TenancyEventService integration with @nestjs/event-emitter', () => {
     const service = module.get(TenancyEventService);
 
     // Should not throw
-    expect(() => service.emit(TenancyEvents.RESOLVED, { tenantId: 'test', request: { headers: {} } })).not.toThrow();
+    expect(() => service.emit(TenancyEvents.RESOLVED, { tenantId: 'test' })).not.toThrow();
 
     await module.close();
   });

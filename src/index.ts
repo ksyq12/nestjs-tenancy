@@ -57,6 +57,7 @@ export { TenancyEventService } from './events/tenancy-event.service';
 export { TenancyTelemetryService } from './telemetry/tenancy-telemetry.service';
 export { TenancyEvents } from './events/tenancy-events';
 export type {
+  TenancyEventRequestSummary,
   TenantResolvedEvent,
   TenantNotFoundEvent,
   TenantValidationFailedEvent,
