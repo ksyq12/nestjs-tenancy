@@ -7,10 +7,7 @@ import { TenancyEvents } from '../src/events/tenancy-events';
 import { HeaderTenantExtractor } from '../src/extractors/header.extractor';
 import { TenancyModuleOptions } from '../src/interfaces/tenancy-module-options.interface';
 import { TenantExtractor } from '../src/interfaces/tenant-extractor.interface';
-
-function createMockEventService(): TenancyEventService & { emit: jest.Mock } {
-  return { emit: jest.fn(), onModuleInit: jest.fn() } as any;
-}
+import { createMockEventService } from './__helpers__/mocks';
 
 function createMockTelemetryService(): TenancyTelemetryService {
   const options: TenancyModuleOptions = { tenantExtractor: 'x-tenant-id' };
@@ -40,28 +37,26 @@ const mockReq = (headers: Record<string, string> = {}, overrides: Record<string,
 const mockRes = () => ({}) as any;
 
 describe('TenantMiddleware', () => {
-  it('should extract tenant and set context', (done) => {
+  it('should extract tenant and set context', async () => {
     const mw = createMiddleware();
-    mw.use(mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }), mockRes(), () => {
+
+    await mw.use(mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }), mockRes(), () => {
       expect(new TenancyContext().getTenantId()).toBe('550e8400-e29b-41d4-a716-446655440000');
-      done();
     });
   });
 
-  it('should call next without context when header missing', (done) => {
+  it('should call next without context when header missing', async () => {
     const mw = createMiddleware();
-    mw.use(mockReq(), mockRes(), () => {
+
+    await mw.use(mockReq(), mockRes(), () => {
       expect(new TenancyContext().getTenantId()).toBeNull();
-      done();
     });
   });
 
   it('should throw BadRequestException for invalid tenant ID', async () => {
     const mw = createMiddleware();
     await expect(
-      new Promise((resolve, reject) => {
-        mw.use(mockReq({ 'x-tenant-id': 'not-a-uuid' }), mockRes(), resolve).catch(reject);
-      }),
+      mw.use(mockReq({ 'x-tenant-id': 'not-a-uuid' }), mockRes(), () => {}),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -86,9 +81,7 @@ describe('TenantMiddleware', () => {
       validateTenantId: async () => { throw new Error('db connection failed'); },
     });
     await expect(
-      new Promise((resolve, reject) => {
-        mw.use(mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }), mockRes(), resolve).catch(reject);
-      }),
+      mw.use(mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }), mockRes(), () => {}),
     ).rejects.toThrow('db connection failed');
   });
 

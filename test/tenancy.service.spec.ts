@@ -1,12 +1,8 @@
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenancyService } from '../src/services/tenancy.service';
-import { TenancyEventService } from '../src/events/tenancy-event.service';
 import { TenancyEvents } from '../src/events/tenancy-events';
 import { TenantContextMissingError } from '../src/errors/tenant-context-missing.error';
-
-function createMockEventService(): TenancyEventService & { emit: jest.Mock } {
-  return { emit: jest.fn(), onModuleInit: jest.fn() } as any;
-}
+import { createMockEventService } from './__helpers__/mocks';
 
 describe('TenancyService', () => {
   let context: TenancyContext;
@@ -67,25 +63,19 @@ describe('TenancyService', () => {
 
   describe('withoutTenant', () => {
     it('should clear tenant context inside callback', async () => {
-      await new Promise<void>((resolve) => {
-        context.run('tenant-123', async () => {
-          await service.withoutTenant(async () => {
-            expect(service.getCurrentTenant()).toBeNull();
-          });
-          resolve();
+      await context.run('tenant-123', async () => {
+        await service.withoutTenant(async () => {
+          expect(service.getCurrentTenant()).toBeNull();
         });
       });
     });
 
     it('should restore tenant after callback completes', async () => {
-      await new Promise<void>((resolve) => {
-        context.run('tenant-123', async () => {
-          await service.withoutTenant(async () => {
-            // tenant is null here
-          });
-          expect(service.getCurrentTenant()).toBe('tenant-123');
-          resolve();
+      await context.run('tenant-123', async () => {
+        await service.withoutTenant(async () => {
+          // tenant is null here
         });
+        expect(service.getCurrentTenant()).toBe('tenant-123');
       });
     });
 
@@ -113,17 +103,12 @@ describe('TenancyService', () => {
     });
 
     it('should emit previous tenant ID when bypassing inside tenant context', async () => {
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-123', async () => {
-          try {
-            await service.withoutTenant(async () => {});
-            expect(eventService.emit).toHaveBeenCalledWith(
-              TenancyEvents.CONTEXT_BYPASSED,
-              { reason: 'withoutTenant', previousTenantId: 'tenant-123' },
-            );
-            resolve();
-          } catch (e) { reject(e); }
-        });
+      await context.run('tenant-123', async () => {
+        await service.withoutTenant(async () => {});
+        expect(eventService.emit).toHaveBeenCalledWith(
+          TenancyEvents.CONTEXT_BYPASSED,
+          { reason: 'withoutTenant', previousTenantId: 'tenant-123' },
+        );
       });
     });
 

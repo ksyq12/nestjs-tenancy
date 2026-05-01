@@ -2,8 +2,8 @@ import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { TenancyGuard } from '../src/guards/tenancy.guard';
 import { TenancyContext } from '../src/services/tenancy-context';
-import { TenancyEventService } from '../src/events/tenancy-event.service';
 import { TenancyEvents } from '../src/events/tenancy-events';
+import { createMockEventService } from './__helpers__/mocks';
 
 function createMockContext(
   type: string = 'http',
@@ -22,10 +22,6 @@ function createMockContext(
     getClass: () => classRef,
     switchToHttp: () => ({ getRequest: () => request }),
   } as any;
-}
-
-function createMockEventService(): TenancyEventService & { emit: jest.Mock } {
-  return { emit: jest.fn(), onModuleInit: jest.fn() } as any;
 }
 
 describe('TenancyGuard', () => {
