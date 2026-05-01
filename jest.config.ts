@@ -5,7 +5,12 @@ const config: Config = {
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
   testPathIgnorePatterns: ['/test/e2e/'],
-  transform: { '^.+\\.ts$': 'ts-jest' },
+  transform: {
+    '^.+\\.ts$': [
+      'ts-jest',
+      { diagnostics: { ignoreCodes: [151002] } },
+    ],
+  },
   collectCoverageFrom: ['src/**/*.ts', '!src/index.ts', '!src/**/index.ts'],
   coverageDirectory: './coverage',
   coverageThreshold: {

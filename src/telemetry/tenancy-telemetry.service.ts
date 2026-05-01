@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import type { Attributes, ContextAPI, Span, TraceAPI, Tracer } from '@opentelemetry/api';
-import { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
+import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
 
 /**
