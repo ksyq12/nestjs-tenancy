@@ -176,6 +176,11 @@ describe('TenantMiddleware', () => {
         setTenantAttribute: jest.fn(),
         startSpan: jest.fn().mockReturnValue(mockSpan),
         startTenantSpan: jest.fn().mockReturnValue(mockSpan),
+        withTenantSpan: jest.fn((
+          _name: string,
+          _tenantId: string,
+          callback: (span: { end: jest.Mock }) => unknown,
+        ) => callback(mockSpan)),
         endSpan: jest.fn(),
       };
       const options: TenancyModuleOptions = {
@@ -199,11 +204,11 @@ describe('TenantMiddleware', () => {
         }),
       ).rejects.toThrow('hook failed');
 
-      expect(mockTelemetry.startTenantSpan).toHaveBeenCalledWith(
+      expect(mockTelemetry.withTenantSpan).toHaveBeenCalledWith(
         'tenant.resolved',
         '550e8400-e29b-41d4-a716-446655440000',
+        expect.any(Function),
       );
-      expect(mockTelemetry.endSpan).toHaveBeenCalledWith(mockSpan);
     });
 
     it('should NOT call next() when onTenantNotFound returns "skip"', async () => {

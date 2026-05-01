@@ -1,4 +1,5 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import type { Attributes, ContextAPI, Span, TraceAPI, Tracer } from '@opentelemetry/api';
 import { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
 
@@ -14,8 +15,9 @@ import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
  */
 @Injectable()
 export class TenancyTelemetryService implements OnModuleInit {
-  private traceApi: { getActiveSpan(): any; getTracer(name: string): any } | null = null;
-  private tracer: { startSpan(name: string, options?: Record<string, unknown>): any } | null = null;
+  private traceApi: TraceAPI | null = null;
+  private contextApi: Pick<ContextAPI, 'active' | 'with'> | null = null;
+  private tracer: Tracer | null = null;
   private readonly spanAttributeKey: string;
   private readonly createSpans: boolean;
 
@@ -31,6 +33,7 @@ export class TenancyTelemetryService implements OnModuleInit {
     try {
       const api = await import('@opentelemetry/api');
       this.traceApi = api.trace;
+      this.contextApi = api.context;
       this.tracer = api.trace.getTracer('@nestarc/tenancy');
     } catch {
       // @opentelemetry/api not installed — telemetry silently skipped
@@ -45,18 +48,64 @@ export class TenancyTelemetryService implements OnModuleInit {
   }
 
   /** Start a custom span (only when createSpans is true). Returns null if disabled or OTel unavailable. */
-  startSpan(name: string, attributes?: Record<string, string>): { end(): void } | null {
+  startSpan(name: string, attributes?: Attributes): Span | null {
     if (!this.tracer || !this.createSpans) return null;
     return this.tracer.startSpan(name, { attributes });
   }
 
   /** Start a custom span with the configured tenant ID attribute attached. */
-  startTenantSpan(name: string, tenantId: string): { end(): void } | null {
+  startTenantSpan(name: string, tenantId: string): Span | null {
     return this.startSpan(name, { [this.spanAttributeKey]: tenantId });
   }
 
+  /** Run a callback with a custom span set as the active OpenTelemetry span. */
+  withSpan<T>(
+    name: string,
+    attributes: Attributes | undefined,
+    callback: (span: Span | null) => T,
+  ): T {
+    const span = this.startSpan(name, attributes);
+    const runCallback = () => callback(span);
+
+    try {
+      const result = span && this.traceApi && this.contextApi
+        ? this.contextApi.with(
+          this.traceApi.setSpan(this.contextApi.active(), span),
+          runCallback,
+        )
+        : runCallback();
+
+      return this.endSpanAfter(span, result);
+    } catch (err) {
+      this.endSpan(span);
+      throw err;
+    }
+  }
+
+  /** Run a callback with a tenant lifecycle span set as active. */
+  withTenantSpan<T>(
+    name: string,
+    tenantId: string,
+    callback: (span: Span | null) => T,
+  ): T {
+    return this.withSpan(name, { [this.spanAttributeKey]: tenantId }, callback);
+  }
+
   /** Safely end a span (null-safe). */
-  endSpan(span: { end(): void } | null): void {
+  endSpan(span: Pick<Span, 'end'> | null): void {
     span?.end();
+  }
+
+  private endSpanAfter<T>(span: Pick<Span, 'end'> | null, result: T): T {
+    if (
+      result &&
+      typeof result === 'object' &&
+      typeof (result as Promise<unknown>).finally === 'function'
+    ) {
+      return (result as Promise<unknown>).finally(() => this.endSpan(span)) as T;
+    }
+
+    this.endSpan(span);
+    return result;
   }
 }

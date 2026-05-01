@@ -112,14 +112,11 @@ export class TenantMiddleware implements NestMiddleware {
 
     await this.context.run(tenantId, async () => {
       this.telemetryService.setTenantAttribute(tenantId);
-      const span = this.telemetryService.startTenantSpan('tenant.resolved', tenantId);
-      try {
+      await this.telemetryService.withTenantSpan('tenant.resolved', tenantId, async () => {
         await this.options.onTenantResolved?.(tenantId, req);
         this.eventService.emit(TenancyEvents.RESOLVED, { tenantId, requestSummary });
         next();
-      } finally {
-        this.telemetryService.endSpan(span);
-      }
+      });
     });
   }
 

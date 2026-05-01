@@ -36,14 +36,21 @@ describe('TenancyTelemetryService', () => {
     const mockTracer = {
       startSpan: jest.fn().mockReturnValue(mockSpan),
     };
+    const mockTraceApi = {
+      getActiveSpan: () => mockSpan,
+      getTracer: () => mockTracer,
+      setSpan: jest.fn((activeContext: unknown, span: unknown) => ({ activeContext, span })),
+    };
+    const mockContextApi = {
+      active: jest.fn(() => ({ active: true })),
+      with: jest.fn((_context: unknown, callback: () => unknown) => callback()),
+    };
 
     beforeEach(() => {
       service = createService({ telemetry: { createSpans: true } });
       // Simulate successful OTel initialization by setting internal state
-      (service as any).traceApi = {
-        getActiveSpan: () => mockSpan,
-        getTracer: () => mockTracer,
-      };
+      (service as any).traceApi = mockTraceApi;
+      (service as any).contextApi = mockContextApi;
       (service as any).tracer = mockTracer;
     });
 
@@ -72,6 +79,20 @@ describe('TenancyTelemetryService', () => {
       expect(span).toBe(mockSpan);
     });
 
+    it('should accept OpenTelemetry non-string span attributes', () => {
+      service.startSpan('tenant.metrics', {
+        'tenant.retry_count': 2,
+        'tenant.sampled': true,
+      });
+
+      expect(mockTracer.startSpan).toHaveBeenCalledWith('tenant.metrics', {
+        attributes: {
+          'tenant.retry_count': 2,
+          'tenant.sampled': true,
+        },
+      });
+    });
+
     it('should create tenant span with configured tenant attribute key', () => {
       const customService = createService({
         telemetry: { spanAttributeKey: 'app.tenant', createSpans: true },
@@ -84,6 +105,26 @@ describe('TenancyTelemetryService', () => {
         attributes: { 'app.tenant': 'tenant-custom' },
       });
       expect(span).toBe(mockSpan);
+    });
+
+    it('should run tenant span callback in active span context and end after async completion', async () => {
+      const order: string[] = [];
+      mockSpan.end.mockImplementationOnce(() => order.push('end'));
+
+      const result = await service.withTenantSpan(
+        'tenant.resolved',
+        'tenant-abc',
+        async (span) => {
+          expect(span).toBe(mockSpan);
+          expect(mockTraceApi.setSpan).toHaveBeenCalledWith({ active: true }, mockSpan);
+          expect(mockContextApi.with).toHaveBeenCalled();
+          order.push('callback');
+          return 'ok';
+        },
+      );
+
+      expect(result).toBe('ok');
+      expect(order).toEqual(['callback', 'end']);
     });
 
     it('should not create span when createSpans is false', () => {
@@ -101,10 +142,7 @@ describe('TenancyTelemetryService', () => {
     });
 
     it('should handle null active span gracefully', () => {
-      (service as any).traceApi = {
-        getActiveSpan: () => null,
-        getTracer: () => mockTracer,
-      };
+      (service as any).traceApi = { ...mockTraceApi, getActiveSpan: () => null };
       expect(() => service.setTenantAttribute('tenant-no-span')).not.toThrow();
     });
   });
