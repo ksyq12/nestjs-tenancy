@@ -112,6 +112,21 @@ describe('TenancyService', () => {
       );
     });
 
+    it('should emit previous tenant ID when bypassing inside tenant context', async () => {
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-123', async () => {
+          try {
+            await service.withoutTenant(async () => {});
+            expect(eventService.emit).toHaveBeenCalledWith(
+              TenancyEvents.CONTEXT_BYPASSED,
+              { reason: 'withoutTenant', previousTenantId: 'tenant-123' },
+            );
+            resolve();
+          } catch (e) { reject(e); }
+        });
+      });
+    });
+
     it('should work without eventService (optional injection)', async () => {
       const serviceNoEvents = new TenancyService(context);
       const result = await serviceNoEvents.withoutTenant(async () => 'ok');

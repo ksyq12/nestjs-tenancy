@@ -27,9 +27,9 @@ export class TenancyContext {
     return TenancyContext.storage.getStore()?.bypassed ?? false;
   }
 
-  runWithoutTenant<T>(callback: () => T | Promise<T>): Promise<T> {
-    return Promise.resolve(
-      TenancyContext.storage.run({ tenantId: null, bypassed: true }, () => callback()),
-    );
+  runWithoutTenant<T>(callback: () => Promise<T>): Promise<T>;
+  runWithoutTenant<T>(callback: () => T): T;
+  runWithoutTenant<T>(callback: () => T | Promise<T>): T | Promise<T> {
+    return TenancyContext.storage.run({ tenantId: null, bypassed: true }, callback);
   }
 }

@@ -28,7 +28,11 @@ export class TenancyService {
   }
 
   async withoutTenant<T>(callback: () => T | Promise<T>): Promise<T> {
-    this.eventService?.emit(TenancyEvents.CONTEXT_BYPASSED, { reason: 'withoutTenant' });
+    const previousTenantId = this.context.getTenantId();
+    this.eventService?.emit(TenancyEvents.CONTEXT_BYPASSED, {
+      reason: 'withoutTenant',
+      ...(previousTenantId ? { previousTenantId } : {}),
+    });
     return this.context.runWithoutTenant(callback);
   }
 }

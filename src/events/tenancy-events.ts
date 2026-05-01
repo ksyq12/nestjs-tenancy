@@ -43,6 +43,7 @@ export interface TenantValidationFailedEvent extends TenancyEventRequestPayload 
 
 export interface TenantContextBypassedEvent {
   reason: 'decorator' | 'withoutTenant';
+  previousTenantId?: string | null;
   requestSummary?: TenancyEventRequestSummary;
 }
 

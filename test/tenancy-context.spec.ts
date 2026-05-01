@@ -98,6 +98,13 @@ describe('TenancyContext', () => {
   });
 
   describe('runWithoutTenant', () => {
+    it('should return sync callback result without wrapping in Promise', () => {
+      const result = context.runWithoutTenant(() => 'sync-result');
+
+      expect(result).toBe('sync-result');
+      expect(result).not.toBeInstanceOf(Promise);
+    });
+
     it('should return null tenant inside runWithoutTenant()', (done) => {
       context.run('tenant-abc', () => {
         context.runWithoutTenant(() => {
