@@ -60,13 +60,23 @@ export class TenantMiddleware implements NestMiddleware {
     }
   }
 
-  async use(req: TenancyRequest, _res: TenancyResponse, next: (error?: any) => void): Promise<void> {
+  async use(req: TenancyRequest, res: TenancyResponse, next: (error?: any) => void): Promise<void> {
     const requestSummary = summarizeTenancyRequest(req);
-    const tenantId = await this.extractor.extract(req);
+    let tenantId: string | null;
+
+    try {
+      tenantId = await this.extractor.extract(req);
+    } catch (err) {
+      this.eventService.emit(TenancyEvents.EXTRACTION_FAILED, {
+        ...this.describeExtractionError(err),
+        requestSummary,
+      });
+      throw err;
+    }
 
     if (!tenantId) {
       this.eventService.emit(TenancyEvents.NOT_FOUND, { requestSummary });
-      const result = await this.options.onTenantNotFound?.(req, _res);
+      const result = await this.options.onTenantNotFound?.(req, res);
       if (result !== 'skip') {
         next();
       }
@@ -102,7 +112,7 @@ export class TenantMiddleware implements NestMiddleware {
 
     await this.context.run(tenantId, async () => {
       this.telemetryService.setTenantAttribute(tenantId);
-      const span = this.telemetryService.startSpan('tenant.resolved');
+      const span = this.telemetryService.startTenantSpan('tenant.resolved', tenantId);
       try {
         await this.options.onTenantResolved?.(tenantId, req);
         this.eventService.emit(TenancyEvents.RESOLVED, { tenantId, requestSummary });
@@ -111,5 +121,19 @@ export class TenantMiddleware implements NestMiddleware {
         this.telemetryService.endSpan(span);
       }
     });
+  }
+
+  private describeExtractionError(err: unknown): { errorName: string; errorMessage: string } {
+    if (err instanceof Error) {
+      return {
+        errorName: err.name,
+        errorMessage: err.message,
+      };
+    }
+
+    return {
+      errorName: 'NonErrorThrown',
+      errorMessage: String(err),
+    };
   }
 }

@@ -60,6 +60,7 @@ export type {
   TenancyEventRequestSummary,
   TenantResolvedEvent,
   TenantNotFoundEvent,
+  TenantExtractionFailedEvent,
   TenantValidationFailedEvent,
   TenantContextBypassedEvent,
   TenantCrossCheckFailedEvent,

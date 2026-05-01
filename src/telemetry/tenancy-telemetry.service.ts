@@ -50,6 +50,11 @@ export class TenancyTelemetryService implements OnModuleInit {
     return this.tracer.startSpan(name, { attributes });
   }
 
+  /** Start a custom span with the configured tenant ID attribute attached. */
+  startTenantSpan(name: string, tenantId: string): { end(): void } | null {
+    return this.startSpan(name, { [this.spanAttributeKey]: tenantId });
+  }
+
   /** Safely end a span (null-safe). */
   endSpan(span: { end(): void } | null): void {
     span?.end();

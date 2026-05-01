@@ -72,6 +72,20 @@ describe('TenancyTelemetryService', () => {
       expect(span).toBe(mockSpan);
     });
 
+    it('should create tenant span with configured tenant attribute key', () => {
+      const customService = createService({
+        telemetry: { spanAttributeKey: 'app.tenant', createSpans: true },
+      });
+      (customService as any).tracer = mockTracer;
+
+      const span = customService.startTenantSpan('tenant.resolved', 'tenant-custom');
+
+      expect(mockTracer.startSpan).toHaveBeenCalledWith('tenant.resolved', {
+        attributes: { 'app.tenant': 'tenant-custom' },
+      });
+      expect(span).toBe(mockSpan);
+    });
+
     it('should not create span when createSpans is false', () => {
       const noSpanService = createService({ telemetry: { createSpans: false } });
       (noSpanService as any).tracer = mockTracer;

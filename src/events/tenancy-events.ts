@@ -11,6 +11,7 @@ export interface TenancyEventRequestSummary {
 export const TenancyEvents = {
   RESOLVED: 'tenant.resolved',
   NOT_FOUND: 'tenant.not_found',
+  EXTRACTION_FAILED: 'tenant.extraction_failed',
   VALIDATION_FAILED: 'tenant.validation_failed',
   CONTEXT_BYPASSED: 'tenant.context_bypassed',
   CROSS_CHECK_FAILED: 'tenant.cross_check_failed',
@@ -30,6 +31,11 @@ export interface TenantResolvedEvent extends TenancyEventRequestPayload {
 }
 
 export type TenantNotFoundEvent = TenancyEventRequestPayload;
+
+export interface TenantExtractionFailedEvent extends TenancyEventRequestPayload {
+  errorName: string;
+  errorMessage: string;
+}
 
 export interface TenantValidationFailedEvent extends TenancyEventRequestPayload {
   tenantId: string;
@@ -82,6 +88,7 @@ export function summarizeTenancyRequest(request: TenancyRequest): TenancyEventRe
 export interface TenancyEventMap {
   [TenancyEvents.RESOLVED]: TenantResolvedEvent;
   [TenancyEvents.NOT_FOUND]: TenantNotFoundEvent;
+  [TenancyEvents.EXTRACTION_FAILED]: TenantExtractionFailedEvent;
   [TenancyEvents.VALIDATION_FAILED]: TenantValidationFailedEvent;
   [TenancyEvents.CONTEXT_BYPASSED]: TenantContextBypassedEvent;
   [TenancyEvents.CROSS_CHECK_FAILED]: TenantCrossCheckFailedEvent;

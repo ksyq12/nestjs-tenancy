@@ -582,7 +582,7 @@ class TenantLogger {
 }
 ```
 
-Events: `tenant.resolved`, `tenant.not_found`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`.
+Events: `tenant.resolved`, `tenant.not_found`, `tenant.extraction_failed`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`.
 
 If `@nestjs/event-emitter` is not installed, events are silently skipped — no errors.
 
@@ -625,7 +625,7 @@ TenancyModule.forRoot({
 })
 ```
 
-When enabled, `tenant.id` is automatically added as a span attribute to the active span on every request. If `createSpans` is `true`, a `tenant.resolved` span is also created.
+When enabled, `tenant.id` is automatically added as a span attribute to the active span on every request. If `createSpans` is `true`, a `tenant.resolved` span is also created with the configured tenant attribute.
 
 If `@opentelemetry/api` is not installed, telemetry is silently skipped — no errors.
 

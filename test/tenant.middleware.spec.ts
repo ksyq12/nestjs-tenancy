@@ -175,6 +175,7 @@ describe('TenantMiddleware', () => {
       const mockTelemetry = {
         setTenantAttribute: jest.fn(),
         startSpan: jest.fn().mockReturnValue(mockSpan),
+        startTenantSpan: jest.fn().mockReturnValue(mockSpan),
         endSpan: jest.fn(),
       };
       const options: TenancyModuleOptions = {
@@ -198,7 +199,10 @@ describe('TenantMiddleware', () => {
         }),
       ).rejects.toThrow('hook failed');
 
-      expect(mockTelemetry.startSpan).toHaveBeenCalledWith('tenant.resolved');
+      expect(mockTelemetry.startTenantSpan).toHaveBeenCalledWith(
+        'tenant.resolved',
+        '550e8400-e29b-41d4-a716-446655440000',
+      );
       expect(mockTelemetry.endSpan).toHaveBeenCalledWith(mockSpan);
     });
 
@@ -465,16 +469,30 @@ describe('TenantMiddleware', () => {
 
   describe('Extractor error propagation', () => {
     it('should propagate error when extractor throws', async () => {
+      const eventService = createMockEventService();
       const throwingExtractor: TenantExtractor = {
         extract: () => { throw new Error('extractor crashed'); },
       };
-      const mw = createMiddleware({ tenantExtractor: throwingExtractor });
+      const mw = createMiddleware({ tenantExtractor: throwingExtractor }, eventService);
 
       await expect(
         new Promise((resolve, reject) => {
           mw.use(mockReq({ 'x-tenant-id': 'any' }), mockRes(), resolve).catch(reject);
         }),
       ).rejects.toThrow('extractor crashed');
+
+      expect(eventService.emit).toHaveBeenCalledWith(
+        TenancyEvents.EXTRACTION_FAILED,
+        {
+          errorName: 'Error',
+          errorMessage: 'extractor crashed',
+          requestSummary: {
+            method: 'GET',
+            path: '/users',
+            ip: '127.0.0.1',
+          },
+        },
+      );
     });
 
     it('should propagate error when async extractor rejects', async () => {
