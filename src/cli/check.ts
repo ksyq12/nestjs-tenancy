@@ -7,6 +7,9 @@ interface CheckOptions {
   dbSettingKey?: string;
 }
 
+const GENERATED_START = '-- BEGIN GENERATED TENANCY SQL';
+const GENERATED_END = '-- END GENERATED TENANCY SQL';
+
 export interface CheckResult {
   inSync: boolean;
   missingPolicies: string[];
@@ -18,6 +21,27 @@ function qualifiedName(model: ParsedModel): string {
   return model.schemaName
     ? `"${model.schemaName}"."${model.tableName}"`
     : `"${model.tableName}"`;
+}
+
+function extractGeneratedSqlSection(sqlContent: string): string {
+  const start = sqlContent.indexOf(GENERATED_START);
+  const end = sqlContent.indexOf(GENERATED_END);
+
+  if (start === -1 || end === -1 || end <= start) {
+    return sqlContent;
+  }
+
+  return sqlContent.slice(start + GENERATED_START.length, end);
+}
+
+function stripSqlLineComments(sqlContent: string): string {
+  return sqlContent
+    .split('\n')
+    .map((line) => {
+      const commentIndex = line.indexOf('--');
+      return commentIndex === -1 ? line : line.slice(0, commentIndex);
+    })
+    .join('\n');
 }
 
 /**
@@ -42,6 +66,8 @@ export function runCheck(options?: CheckOptions): CheckResult {
 
   const schemaContent = fs.readFileSync(schemaPath, 'utf-8');
   const sqlContent = fs.readFileSync(sqlPath, 'utf-8');
+  const generatedSql = extractGeneratedSqlSection(sqlContent);
+  const sqlForTableScan = stripSqlLineComments(generatedSql);
 
   const models = parseModels(schemaContent);
   const expectedTables = new Set(
@@ -49,17 +75,22 @@ export function runCheck(options?: CheckOptions): CheckResult {
   );
 
   // Parse tables with RLS enabled from SQL
-  const rlsRegex = /ALTER TABLE\s+(.+?)\s+ENABLE ROW LEVEL SECURITY/g;
+  const quotedIdentifier = '"[^"]+"';
+  const qualifiedTable = `${quotedIdentifier}(?:\\.${quotedIdentifier})?`;
+  const rlsRegex = new RegExp(
+    `ALTER TABLE\\s+(${qualifiedTable})\\s+ENABLE ROW LEVEL SECURITY`,
+    'g',
+  );
   const sqlTables = new Set<string>();
   let match: RegExpExecArray | null;
-  while ((match = rlsRegex.exec(sqlContent)) !== null) {
+  while ((match = rlsRegex.exec(sqlForTableScan)) !== null) {
     sqlTables.add(match[1]);
   }
 
   // Detect shared models
   const sharedRegex = /-- (\w+) \(shared model\)/g;
   const sharedModels = new Set<string>();
-  while ((match = sharedRegex.exec(sqlContent)) !== null) {
+  while ((match = sharedRegex.exec(generatedSql)) !== null) {
     sharedModels.add(match[1]);
   }
 
@@ -92,7 +123,7 @@ export function runCheck(options?: CheckOptions): CheckResult {
 
     // Check FORCE ROW LEVEL SECURITY
     const forcePattern = `ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`;
-    if (!sqlContent.includes(forcePattern)) {
+    if (!generatedSql.includes(forcePattern)) {
       warnings.push(`${table}: missing FORCE ROW LEVEL SECURITY`);
     }
 
@@ -101,7 +132,7 @@ export function runCheck(options?: CheckOptions): CheckResult {
     const isolationRegex = new RegExp(
       `CREATE POLICY\\s+tenant_isolation_\\S+\\s+ON\\s+${escapedTable}`,
     );
-    if (!isolationRegex.test(sqlContent)) {
+    if (!isolationRegex.test(generatedSql)) {
       warnings.push(`${table}: missing tenant_isolation policy`);
     }
 
@@ -109,7 +140,7 @@ export function runCheck(options?: CheckOptions): CheckResult {
     const insertRegex = new RegExp(
       `CREATE POLICY\\s+tenant_insert_\\S+\\s+ON\\s+${escapedTable}`,
     );
-    if (!insertRegex.test(sqlContent)) {
+    if (!insertRegex.test(generatedSql)) {
       warnings.push(`${table}: missing tenant_insert policy`);
     }
 
@@ -117,7 +148,7 @@ export function runCheck(options?: CheckOptions): CheckResult {
 
   // Check setting key consistency across ALL current_setting() calls
   const keyRegex = /current_setting\('([^']+)'/g;
-  for (const keyMatch of sqlContent.matchAll(keyRegex)) {
+  for (const keyMatch of generatedSql.matchAll(keyRegex)) {
     if (keyMatch[1] !== expectedKey) {
       warnings.push(
         `Setting key mismatch: SQL uses '${keyMatch[1]}', expected '${expectedKey}'`,

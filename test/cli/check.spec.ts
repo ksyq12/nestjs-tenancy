@@ -153,6 +153,51 @@ model User {
     expect(result.inSync).toBe(true);
   });
 
+  it('should ignore user-managed SQL outside generated boundaries', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(`${sql}\n\n-- user-managed SQL\nALTER TABLE "ManualAudit" ENABLE ROW LEVEL SECURITY;`);
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(true);
+    expect(result.extraPolicies).toHaveLength(0);
+  });
+
+  it('should not parse SQL comments as part of RLS table names', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+
+    writeSql([
+      'ALTER TABLE "User" -- operator note',
+      '  ENABLE ROW LEVEL SECURITY;',
+      'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+      "CREATE POLICY tenant_isolation_User ON \"User\"",
+      "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
+      "CREATE POLICY tenant_insert_User ON \"User\"",
+      "  FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);",
+    ].join('\n'));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.extraPolicies).not.toContain('"User" -- operator note');
+    expect(result.missingPolicies).toHaveLength(0);
+    expect(result.inSync).toBe(true);
+  });
+
   it('should return not in sync when schema.prisma is missing', () => {
     writeSql('-- some sql');
     const result = runCheck({ cwd: tmpDir });

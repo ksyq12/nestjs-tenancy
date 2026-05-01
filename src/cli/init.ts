@@ -96,6 +96,15 @@ export async function runInit(options?: InitOptions): Promise<void> {
 
   if (!response.extractor) return;
 
+  if (response.tenantFormat === 'Custom' && response.customRegex) {
+    try {
+      new RegExp(response.customRegex);
+    } catch (err) {
+      console.error(`Invalid regex: ${(err as Error).message}`);
+      return;
+    }
+  }
+
   const sharedModels = response.sharedModels
     ? response.sharedModels.split(',').map((s: string) => s.trim()).filter(Boolean)
     : [];

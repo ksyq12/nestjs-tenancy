@@ -222,7 +222,32 @@ describe('CLI init', () => {
     const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
     expect(fs.existsSync(modulePath)).toBe(true);
     const content = fs.readFileSync(modulePath, 'utf-8');
-    expect(content).toContain("validateTenantId: (id) => new RegExp('^[a-z0-9-]+$').test(id),");
+    expect(content).toContain('validateTenantId: (id) => new RegExp("^[a-z0-9-]+$").test(id),');
+  });
+
+  it('should reject invalid custom regex before writing generated files', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      'model User {\n  id Int @id\n}\n',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'Custom',
+      customRegex: '[invalid',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await runInit({ cwd: tmpDir });
+
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid regex:'));
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
+    consoleSpy.mockRestore();
   });
 
   it('should return early when user cancels (no extractor in response)', async () => {

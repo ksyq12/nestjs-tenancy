@@ -73,8 +73,9 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
 
   if (options.tenantFormat === 'Custom' && options.customRegex) {
     // Use new RegExp() instead of /.../ literal to safely handle regex with '/'
-    const escaped = options.customRegex.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    lines.push(`  validateTenantId: (id) => new RegExp('${escaped}').test(id),`);
+    lines.push(
+      `  validateTenantId: (id) => new RegExp(${JSON.stringify(options.customRegex)}).test(id),`,
+    );
   }
 
   if (options.dbSettingKey !== 'app.current_tenant') {

@@ -16,6 +16,18 @@ describe('generateSetupSql', () => {
     expect(sql).toContain('GRANT USAGE ON SCHEMA "public" TO app_user;');
   });
 
+  it('should not generate a hardcoded app_user password', () => {
+    const sql = generateSetupSql(baseOptions);
+    expect(sql).not.toContain("'changeme'");
+    expect(sql).toContain('ALTER ROLE app_user WITH PASSWORD');
+  });
+
+  it('should wrap generated SQL with boundary markers', () => {
+    const sql = generateSetupSql(baseOptions);
+    expect(sql).toContain('-- BEGIN GENERATED TENANCY SQL');
+    expect(sql).toContain('-- END GENERATED TENANCY SQL');
+  });
+
   it('should include tenant_id warning comment in header', () => {
     const sql = generateSetupSql(baseOptions);
     expect(sql).toContain("-- IMPORTANT: This script assumes all non-shared models have a 'tenant_id' column.");
@@ -334,7 +346,7 @@ describe('generateModuleSetup', () => {
       tenantFormat: 'Custom',
       customRegex: '^[a-z0-9-]+$',
     });
-    expect(result).toContain("validateTenantId: (id) => new RegExp('^[a-z0-9-]+$').test(id),");
+    expect(result).toContain('validateTenantId: (id) => new RegExp("^[a-z0-9-]+$").test(id),');
   });
 
   it('should safely handle customRegex containing forward slashes', () => {
@@ -343,7 +355,7 @@ describe('generateModuleSetup', () => {
       tenantFormat: 'Custom',
       customRegex: '^acme/.+$',
     });
-    expect(result).toContain("validateTenantId: (id) => new RegExp('^acme/.+$').test(id),");
+    expect(result).toContain('validateTenantId: (id) => new RegExp("^acme/.+$").test(id),');
   });
 
   it('should escape backslashes in customRegex for string context', () => {
@@ -352,7 +364,17 @@ describe('generateModuleSetup', () => {
       tenantFormat: 'Custom',
       customRegex: '^\\d{3}-\\d{4}$',
     });
-    expect(result).toContain("validateTenantId: (id) => new RegExp('^\\\\d{3}-\\\\d{4}$').test(id),");
+    expect(result).toContain('validateTenantId: (id) => new RegExp("^\\\\d{3}-\\\\d{4}$").test(id),');
+  });
+
+  it('should safely serialize customRegex containing newlines', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      tenantFormat: 'Custom',
+      customRegex: '^abc\ndef$',
+    });
+    expect(result).toContain('validateTenantId: (id) => new RegExp("^abc\\ndef$").test(id),');
+    expect(result).not.toContain("new RegExp('^abc\ndef$')");
   });
 
   it('should NOT include validateTenantId when tenantFormat is UUID', () => {
