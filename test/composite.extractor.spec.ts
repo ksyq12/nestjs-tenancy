@@ -20,6 +20,16 @@ describe('CompositeTenantExtractor', () => {
     expect(await extractor.extract(req)).toBe('tenant-b');
   });
 
+  it('should return synchronously when all extractors are synchronous', () => {
+    const extractor = new CompositeTenantExtractor([
+      mockExtractor(null),
+      mockExtractor('sync-tenant'),
+    ]);
+    const result = extractor.extract({} as any);
+    expect(result).toBe('sync-tenant');
+    expect(result).not.toBeInstanceOf(Promise);
+  });
+
   it('should return null when all extractors return null', async () => {
     const extractor = new CompositeTenantExtractor([
       mockExtractor(null),

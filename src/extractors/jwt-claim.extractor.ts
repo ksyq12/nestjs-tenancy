@@ -6,6 +6,24 @@ export interface JwtClaimExtractorOptions {
   headerName?: string;
 }
 
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const paddingLength = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized + '='.repeat(paddingLength);
+  return Buffer.from(padded, 'base64').toString('utf-8');
+}
+
+function isTokenOutsideTimeWindow(payload: Record<string, unknown>): boolean {
+  const now = Date.now();
+  if (typeof payload.exp === 'number' && payload.exp * 1000 <= now) {
+    return true;
+  }
+  if (typeof payload.nbf === 'number' && payload.nbf * 1000 > now) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Extracts the tenant ID from a JWT claim in the Authorization header.
  *
@@ -29,16 +47,16 @@ export class JwtClaimTenantExtractor implements TenantExtractor {
     const headerValue = request.headers[this.headerName];
     if (!headerValue || Array.isArray(headerValue)) return null;
 
-    if (!headerValue.startsWith('Bearer ')) return null;
-    const token = headerValue.slice(7);
+    const bearerMatch = headerValue.match(/^\s*Bearer\s+(.+?)\s*$/i);
+    if (!bearerMatch) return null;
+    const token = bearerMatch[1];
 
     const parts = token.split('.');
     if (parts.length !== 3) return null;
 
     try {
-      const payload = JSON.parse(
-        Buffer.from(parts[1], 'base64url').toString('utf-8'),
-      );
+      const payload = JSON.parse(decodeBase64Url(parts[1])) as Record<string, unknown>;
+      if (isTokenOutsideTimeWindow(payload)) return null;
       const value = payload[this.claimKey];
       if (value == null) return null;
       return String(value);

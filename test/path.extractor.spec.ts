@@ -13,6 +13,24 @@ describe('PathTenantExtractor', () => {
     expect(extractor.extract(req)).toBe('abc-123');
   });
 
+  it('should ignore query string and hash fragments', () => {
+    const extractor = new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' });
+    const req = { path: '/api/tenants/abc-123?include=users#section' } as any;
+    expect(extractor.extract(req)).toBe('abc-123');
+  });
+
+  it('should decode URL-encoded tenant segment', () => {
+    const extractor = new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' });
+    const req = { path: '/api/tenants/acme%20corp' } as any;
+    expect(extractor.extract(req)).toBe('acme corp');
+  });
+
+  it('should return null for malformed URL encoding', () => {
+    const extractor = new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' });
+    const req = { path: '/api/tenants/%E0%A4%A' } as any;
+    expect(extractor.extract(req)).toBeNull();
+  });
+
   it('should return null when path has fewer segments than pattern', () => {
     const extractor = new PathTenantExtractor({ pattern: '/api/tenants/:tenantId', paramName: 'tenantId' });
     const req = { path: '/api/tenants' } as any;

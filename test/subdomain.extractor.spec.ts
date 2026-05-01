@@ -67,6 +67,18 @@ describe('SubdomainTenantExtractor', () => {
     expect(extractor.extract(req)).toBeNull();
   });
 
+  it('should return null for bracketed IPv6 address', () => {
+    const extractor = new SubdomainTenantExtractor();
+    const req = { hostname: '[::1]' } as any;
+    expect(extractor.extract(req)).toBeNull();
+  });
+
+  it('should return null for IPv6 address without brackets', () => {
+    const extractor = new SubdomainTenantExtractor();
+    const req = { hostname: '2001:db8::1' } as any;
+    expect(extractor.extract(req)).toBeNull();
+  });
+
   it('should handle com.au TLD', () => {
     const extractor = new SubdomainTenantExtractor();
     const req = { hostname: 'tenant1.example.com.au' } as any;

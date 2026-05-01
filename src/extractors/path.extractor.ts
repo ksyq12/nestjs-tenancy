@@ -6,6 +6,10 @@ export interface PathExtractorOptions {
   paramName: string;
 }
 
+function pathWithoutQueryOrHash(path: string): string {
+  return path.split('?')[0].split('#')[0];
+}
+
 export class PathTenantExtractor implements TenantExtractor {
   private readonly patternSegments: string[];
   private readonly paramIndex: number;
@@ -25,7 +29,7 @@ export class PathTenantExtractor implements TenantExtractor {
   extract(request: TenancyRequest): string | null {
     if (!request.path) return null;
 
-    const pathSegments = request.path.split('/').filter(Boolean);
+    const pathSegments = pathWithoutQueryOrHash(request.path).split('/').filter(Boolean);
 
     if (pathSegments.length < this.patternSegments.length) return null;
 
@@ -34,6 +38,10 @@ export class PathTenantExtractor implements TenantExtractor {
       if (this.patternSegments[i] !== pathSegments[i]) return null;
     }
 
-    return pathSegments[this.paramIndex];
+    try {
+      return decodeURIComponent(pathSegments[this.paramIndex]);
+    } catch {
+      return null;
+    }
   }
 }

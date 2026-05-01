@@ -10,7 +10,6 @@ let pslModule: typeof import('psl') | null = null;
 function loadPsl(): typeof import('psl') {
   if (pslModule) return pslModule;
   try {
-     
     pslModule = require('psl');
     if (!pslModule) throw new Error('Failed to load "psl" module');
     return pslModule;
@@ -19,6 +18,13 @@ function loadPsl(): typeof import('psl') {
       'SubdomainTenantExtractor requires the "psl" package. Install it: npm install psl',
     );
   }
+}
+
+function isIpAddress(hostname: string): boolean {
+  const normalized = hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1)
+    : hostname;
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(normalized) || normalized.includes(':');
 }
 
 export class SubdomainTenantExtractor implements TenantExtractor {
@@ -37,7 +43,7 @@ export class SubdomainTenantExtractor implements TenantExtractor {
     if (!hostname) return null;
 
     // Reject IP addresses — psl treats octets as domain segments
-    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+    if (isIpAddress(hostname)) {
       return null;
     }
 

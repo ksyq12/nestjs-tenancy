@@ -8,9 +8,27 @@ export class CompositeTenantExtractor implements TenantExtractor {
     this.extractors = extractors;
   }
 
-  async extract(request: TenancyRequest): Promise<string | null> {
-    for (const extractor of this.extractors) {
-      const result = await extractor.extract(request);
+  extract(request: TenancyRequest): string | null | Promise<string | null> {
+    for (let i = 0; i < this.extractors.length; i++) {
+      const result = this.extractors[i].extract(request);
+      if (result instanceof Promise) {
+        return this.extractAsync(request, i, result);
+      }
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  private async extractAsync(
+    request: TenancyRequest,
+    currentIndex: number,
+    pendingResult: Promise<string | null>,
+  ): Promise<string | null> {
+    const firstResult = await pendingResult;
+    if (firstResult != null) return firstResult;
+
+    for (let i = currentIndex + 1; i < this.extractors.length; i++) {
+      const result = await this.extractors[i].extract(request);
       if (result != null) return result;
     }
     return null;

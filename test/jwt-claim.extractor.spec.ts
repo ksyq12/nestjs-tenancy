@@ -14,6 +14,60 @@ describe('JwtClaimTenantExtractor', () => {
     expect(extractor.extract(req)).toBe('acme-corp');
   });
 
+  it('should accept case-insensitive Bearer scheme with flexible whitespace', () => {
+    const extractor = new JwtClaimTenantExtractor({ claimKey: 'tenant_id' });
+    const token = makeJwt({ tenant_id: 'acme-corp' });
+    const req = { headers: { authorization: `  bearer\t${token}  ` } } as any;
+    expect(extractor.extract(req)).toBe('acme-corp');
+  });
+
+  it('should decode base64url payload without requiring Buffer base64url support', () => {
+    const extractor = new JwtClaimTenantExtractor({ claimKey: 'tenant_id' });
+    const token = makeJwt({ tenant_id: 'fallback-tenant' });
+    const req = { headers: { authorization: `Bearer ${token}` } } as any;
+    const originalFrom = Buffer.from;
+    const fromSpy = jest.spyOn(Buffer, 'from').mockImplementation(
+      (value: any, encoding?: BufferEncoding) => {
+        if (encoding === 'base64url') {
+          throw new Error('base64url unsupported');
+        }
+        return originalFrom(value, encoding);
+      },
+    );
+
+    try {
+      expect(extractor.extract(req)).toBe('fallback-tenant');
+    } finally {
+      fromSpy.mockRestore();
+    }
+  });
+
+  it('should return null for expired tokens', () => {
+    const extractor = new JwtClaimTenantExtractor({ claimKey: 'tenant_id' });
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const token = makeJwt({ tenant_id: 'expired', exp: 999 });
+    const req = { headers: { authorization: `Bearer ${token}` } } as any;
+
+    try {
+      expect(extractor.extract(req)).toBeNull();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('should return null for tokens before nbf', () => {
+    const extractor = new JwtClaimTenantExtractor({ claimKey: 'tenant_id' });
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const token = makeJwt({ tenant_id: 'too-early', nbf: 1001 });
+    const req = { headers: { authorization: `Bearer ${token}` } } as any;
+
+    try {
+      expect(extractor.extract(req)).toBeNull();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('should return null when no authorization header', () => {
     const extractor = new JwtClaimTenantExtractor({ claimKey: 'tenant_id' });
     const req = { headers: {} } as any;
