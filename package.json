@@ -105,7 +105,7 @@
     "@prisma/client": "^6.0.0",
     "@types/express": "^5.0.0",
     "@types/jest": "^29.0.0",
-    "@types/node": "^25.5.0",
+    "@types/node": "^26.1.0",
     "@types/pg": "^8.11.0",
     "@types/prompts": "^2.4.9",
     "@types/supertest": "^7.2.0",
