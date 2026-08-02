@@ -86,7 +86,8 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
 
   lines.push('');
   lines.push('// Prisma extension — required for RLS to work:');
-  lines.push('// const prisma = new PrismaClient().$extends(');
+  lines.push('// Prisma 7: create basePrisma with the adapter required by your database.');
+  lines.push('// const prisma = basePrisma.$extends(');
   if (hasExtensionOptions) {
     lines.push('//   createPrismaTenancyExtension(tenancyService, {');
     if (options.autoInjectTenantId) {

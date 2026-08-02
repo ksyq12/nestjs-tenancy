@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- First-class Prisma 7 support with Prisma Config, the `prisma-client` generator, and PostgreSQL driver-adapter E2E coverage.
+- A Prisma 6 compatibility CI lane alongside the Prisma 7 primary test matrix.
+
+### Changed (Breaking)
+
+- Raised the minimum Node.js version from 18 to 20.19, matching Prisma 7's runtime requirement.
+- Made Prisma 7 the development and E2E baseline. Prisma 6 remains supported; Prisma 5 is no longer supported.
+- Updated Prisma setup examples to use a generated client output and `@prisma/adapter-pg`.
+
+### Fixed
+
+- Import `Prisma.defineExtension` from `@prisma/client/extension`, allowing shared extensions to build without a generated `@prisma/client` root export.
+- Moved the E2E datasource URL to `prisma.config.ts`, as required by Prisma 7.
+
 ## [0.13.0] - 2026-06-06
 
 ### Added

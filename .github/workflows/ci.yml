@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20.19.0, 22, 24]
 
     steps:
       - uses: actions/checkout@v6
@@ -28,7 +28,7 @@ jobs:
       - run: npm run build
 
       - name: Upload coverage to Codecov
-        if: matrix.node-version == 20
+        if: matrix.node-version == 22
         uses: codecov/codecov-action@v5
         with:
           directory: ./coverage
@@ -40,11 +40,8 @@ jobs:
       matrix:
         include:
           - nest: 10
-            prisma: 5
-            node: 20
-          - nest: 11
             prisma: 6
-            node: 22
+            node: 20.19.0
     steps:
       - uses: actions/checkout@v6
 
@@ -55,7 +52,6 @@ jobs:
 
       - run: npm ci
       - name: Override to Nest ${{ matrix.nest }} + Prisma ${{ matrix.prisma }}
-        if: matrix.nest == 10
         run: npm install @nestjs/common@${{ matrix.nest }} @nestjs/core@${{ matrix.nest }} @nestjs/testing@${{ matrix.nest }} @nestjs/platform-express@${{ matrix.nest }} @prisma/client@${{ matrix.prisma }} --no-save
       - run: npm test
       - run: npm run build
@@ -78,7 +74,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci

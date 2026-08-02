@@ -33,7 +33,7 @@ One line of code. Automatic tenant isolation.
 - **ccTLD-aware subdomain extraction** — accurate parsing for `.co.uk`, `.co.jp`, `.com.au`, etc.
 - **Framework-agnostic** — public API uses `TenancyRequest` / `TenancyResponse` instead of Express types. Works with Express, Fastify, and raw Node.js HTTP
 - **SQL injection safe** — `set_config()` with bind parameters, plus UUID validation by default
-- **NestJS 10 & 11** compatible, **Prisma 5 & 6** compatible (E2E-tested with Prisma 6; Prisma 5 unit-tested)
+- **NestJS 10 & 11** compatible, **Prisma 7 first-class** with a Prisma 6 compatibility lane
 
 ## Performance
 
@@ -49,31 +49,33 @@ The benchmark separates extension overhead from row-count and database-role effe
 
 The headline number is `extension findMany - manual RLS transaction`, not extension vs unfiltered admin query. The script prints row counts, Node/PostgreSQL/Prisma versions, and p50/p95/p99 timings so results can be compared across environments.
 
-Example result from Apple M1 Pro, Node v24.11.1, PostgreSQL 16.13, Prisma Client 6.19.2, 1005 total rows, 500 measured iterations:
+Example result from Apple M1 Pro, Node v24.11.1, PostgreSQL 16.14, Prisma Client 7.9.1, 1005 total rows, 500 measured iterations:
 
 | Scenario | Rows | Avg | P50 | P95 | P99 |
 |----------|------|-----|-----|-----|-----|
-| Admin direct `findMany` (all rows, no RLS) | 1005 | 3.983ms | 3.369ms | 5.444ms | 6.992ms |
-| Admin tenant-filtered `findMany` (`WHERE tenant_id`, no RLS) | 402 | 2.747ms | 2.736ms | 3.612ms | 4.686ms |
-| `app_user` manual RLS transaction (`set_config` + `findMany`) | 402 | 2.846ms | 2.614ms | 4.154ms | 5.177ms |
-| `app_user` tenancy extension `findMany` | 402 | 2.961ms | 2.766ms | 4.281ms | 4.800ms |
-| `app_user` tenancy extension `findFirst` | 1 | 1.217ms | 1.192ms | 1.522ms | 1.777ms |
+| Admin direct `findMany` (all rows, no RLS) | 1005 | 1.779ms | 1.585ms | 3.199ms | 5.261ms |
+| Admin tenant-filtered `findMany` (`WHERE tenant_id`, no RLS) | 402 | 1.081ms | 0.972ms | 1.643ms | 3.616ms |
+| `app_user` manual RLS transaction (`set_config` + `findMany`) | 402 | 2.375ms | 2.253ms | 3.057ms | 5.337ms |
+| `app_user` tenancy extension `findMany` | 402 | 2.372ms | 2.276ms | 2.891ms | 5.987ms |
+| `app_user` tenancy extension `findFirst` | 1 | 1.605ms | 1.561ms | 2.209ms | 2.695ms |
 
-Measured extension overhead: **+0.115ms avg (+4.0%)**, **+0.127ms p95** compared with the manual RLS transaction.
+Measured extension overhead: **-0.003ms avg (-0.1%)**, **-0.166ms p95** compared with the manual RLS transaction. Treat sub-millisecond differences as run-to-run noise; the important result is that the extension remains on par with the equivalent manual transaction.
 
 > Reproduce: `docker compose up -d --wait && npm run bench`
 
 ## Prerequisites
 
-- Node.js >= 18
+- Node.js >= 20.19
 - NestJS 10 or 11
-- Prisma 5 or 6
+- Prisma 7 (recommended) or Prisma 6
 - PostgreSQL (with RLS support). Use a patched minor release: CVE-2024-10976 is fixed in PostgreSQL 17.1, 16.5, 15.9, 14.14, 13.17, and 12.21.
 
 ## Installation
 
 ```bash
 npm install @nestarc/tenancy
+npm install @prisma/client @prisma/adapter-pg pg dotenv
+npm install --save-dev prisma
 ```
 
 ## Quick Start
@@ -127,9 +129,38 @@ export class AppModule {}
 
 ### 3. Extend your Prisma client
 
+Configure Prisma 7 to generate the client into your source tree and keep the connection URL in Prisma Config:
+
+```prisma
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+```
+
+```typescript
+// prisma.config.ts
+import 'dotenv/config';
+import { defineConfig, env } from 'prisma/config';
+
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  datasource: {
+    url: env('DATABASE_URL'),
+  },
+});
+```
+
+Run `npx prisma generate`, then extend the generated client:
+
 ```typescript
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from './generated/prisma/client';
 import { TenancyService, createPrismaTenancyExtension } from '@nestarc/tenancy';
 
 @Injectable()
@@ -137,8 +168,11 @@ export class PrismaService implements OnModuleInit {
   public readonly client;
 
   constructor(private readonly tenancyService: TenancyService) {
-    const prisma = new PrismaClient();
-    this.client = prisma.$extends(
+    const adapter = new PrismaPg({
+      connectionString: process.env.DATABASE_URL!,
+    });
+    const basePrisma = new PrismaClient({ adapter });
+    this.client = basePrisma.$extends(
       createPrismaTenancyExtension(tenancyService),
     );
   }
@@ -148,6 +182,8 @@ export class PrismaService implements OnModuleInit {
   }
 }
 ```
+
+The example uses the Prisma 7 `prisma-client` generator and its required PostgreSQL driver adapter. Prisma 6 consumers can keep their existing client construction and apply the same extension to their base client.
 
 #### Extension Options
 
@@ -549,7 +585,7 @@ TenancyModule.forRoot({
 By default, model queries without a tenant context throw `TenancyContextRequiredError`. This avoids silent unscoped query paths when RLS is misconfigured or accidentally bypassed.
 
 ```typescript
-const prisma = new PrismaClient().$extends(
+const prisma = basePrisma.$extends(
   createPrismaTenancyExtension(tenancyService, {
     failClosed: true, // default
   })
@@ -563,7 +599,7 @@ Queries are still allowed when:
 To restore the previous pass-through behavior, opt out explicitly:
 
 ```typescript
-const prisma = new PrismaClient().$extends(
+const prisma = basePrisma.$extends(
   createPrismaTenancyExtension(tenancyService, {
     failClosed: false,
   })

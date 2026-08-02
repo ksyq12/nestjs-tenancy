@@ -17,7 +17,7 @@ import { TenancyContextRequiredError } from '../src/errors/tenancy-context-requi
 // Mock Prisma.defineExtension to capture the factory function
 let capturedFactory: ((prisma: any) => any) | null = null;
 
-jest.mock('@prisma/client', () => ({
+jest.mock('@prisma/client/extension', () => ({
   Prisma: {
     defineExtension: (factory: (prisma: any) => any) => {
       capturedFactory = factory;

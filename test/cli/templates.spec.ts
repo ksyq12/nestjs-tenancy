@@ -315,6 +315,9 @@ describe('generateModuleSetup', () => {
     const result = generateModuleSetup(baseOptions);
     expect(result).toContain('createPrismaTenancyExtension(tenancyService)');
     expect(result).toContain('// Prisma extension — required for RLS to work:');
+    expect(result).toContain('// Prisma 7: create basePrisma with the adapter required by your database.');
+    expect(result).toContain('// const prisma = basePrisma.$extends(');
+    expect(result).not.toContain('new PrismaClient().$extends');
   });
 
   it('should include options in extension block when autoInjectTenantId is true', () => {

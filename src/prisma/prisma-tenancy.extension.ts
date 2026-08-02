@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client/extension';
 import { TenancyService } from '../services/tenancy.service';
 import { TenancyContextRequiredError } from '../errors/tenancy-context-required.error';
 import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
@@ -88,7 +88,7 @@ export interface PrismaTenancyExtensionOptions {
  *
  * Usage:
  * ```typescript
- * const prisma = new PrismaClient().$extends(
+ * const prisma = basePrisma.$extends(
  *   createPrismaTenancyExtension(tenancyService)
  * );
  * ```

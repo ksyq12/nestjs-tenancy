@@ -1,4 +1,5 @@
 import { Client } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 import * as path from 'path';
 import { TenancyContext } from '../../src/services/tenancy-context';
 import { TenancyService } from '../../src/services/tenancy.service';
@@ -12,6 +13,12 @@ const ADMIN_URL =
   process.env.DATABASE_URL ?? 'postgresql://tenancy:tenancy@localhost:5433/tenancy_test';
 const APP_URL =
   process.env.APP_DATABASE_URL ?? 'postgresql://app_user:app_user@localhost:5433/tenancy_test';
+
+function createClient(PrismaClient: any, connectionString: string) {
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString }),
+  });
+}
 
 // Shared admin client for cleanup within describe blocks
 let sharedAdminClient: Client;
@@ -40,7 +47,7 @@ describe('Prisma Extension + RLS Integration', () => {
 
   beforeAll(async () => {
     // Import the generated Prisma client (prisma generate runs before jest via test:e2e script)
-    const generatedPath = path.join(__dirname, 'generated');
+    const generatedPath = path.join(__dirname, 'generated', 'client');
     const prismaModule = require(generatedPath);
     PrismaClient = prismaModule.PrismaClient;
 
@@ -48,9 +55,7 @@ describe('Prisma Extension + RLS Integration', () => {
     context = new TenancyContext();
     service = new TenancyService(context);
 
-    const basePrisma = new PrismaClient({
-      datasourceUrl: APP_URL,
-    });
+    const basePrisma = createClient(PrismaClient, APP_URL);
 
     prisma = basePrisma.$extends(createPrismaTenancyExtension(service));
 
@@ -143,14 +148,14 @@ describe('Prisma Extension v0.2.0 Features', () => {
   let prisma: any;
 
   beforeAll(async () => {
-    const generatedPath = path.join(__dirname, 'generated');
+    const generatedPath = path.join(__dirname, 'generated', 'client');
     const prismaModule = require(generatedPath);
     const PrismaClient = prismaModule.PrismaClient;
 
     context = new TenancyContext();
     service = new TenancyService(context);
 
-    const basePrisma = new PrismaClient({ datasourceUrl: APP_URL });
+    const basePrisma = createClient(PrismaClient, APP_URL);
     prisma = basePrisma.$extends(
       createPrismaTenancyExtension(service, {
         autoInjectTenantId: true,
@@ -214,10 +219,10 @@ describe('tenancyTransaction() E2E', () => {
   let basePrisma: any;
 
   beforeAll(async () => {
-    const PrismaClient = require(path.join(__dirname, 'generated')).PrismaClient;
+    const PrismaClient = require(path.join(__dirname, 'generated', 'client')).PrismaClient;
     context = new TenancyContext();
     service = new TenancyService(context);
-    basePrisma = new PrismaClient({ datasourceUrl: APP_URL });
+    basePrisma = createClient(PrismaClient, APP_URL);
     await basePrisma.$connect();
   }, 30000);
 
@@ -278,11 +283,11 @@ describe('interactiveTransactionSupport E2E', () => {
   let prisma: any;
 
   beforeAll(async () => {
-    const PrismaClient = require(path.join(__dirname, 'generated')).PrismaClient;
+    const PrismaClient = require(path.join(__dirname, 'generated', 'client')).PrismaClient;
     context = new TenancyContext();
     service = new TenancyService(context);
 
-    const basePrisma = new PrismaClient({ datasourceUrl: APP_URL });
+    const basePrisma = createClient(PrismaClient, APP_URL);
     prisma = basePrisma.$extends(
       createPrismaTenancyExtension(service, {
         interactiveTransactionSupport: true,

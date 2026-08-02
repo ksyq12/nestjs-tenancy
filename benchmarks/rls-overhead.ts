@@ -19,6 +19,7 @@
 
 import { execFileSync } from 'child_process';
 import { Client } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -66,7 +67,16 @@ interface PrismaClientLike {
 }
 
 interface PrismaClientConstructor {
-  new(options: { datasourceUrl: string }): PrismaClientLike;
+  new(options: { adapter: unknown }): PrismaClientLike;
+}
+
+function createClient(
+  PrismaClient: PrismaClientConstructor,
+  connectionString: string,
+): PrismaClientLike {
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString }),
+  });
 }
 
 type BenchTask<T> = () => Promise<T>;
@@ -221,18 +231,18 @@ async function main() {
     stdio: 'inherit',
   });
 
-  const generatedPath = path.join(__dirname, '..', 'test', 'e2e', 'generated');
+  const generatedPath = path.join(__dirname, '..', 'test', 'e2e', 'generated', 'client');
   const { PrismaClient } = require(generatedPath) as { PrismaClient: PrismaClientConstructor };
 
-  const prismaAdmin = new PrismaClient({ datasourceUrl: ADMIN_URL });
+  const prismaAdmin = createClient(PrismaClient, ADMIN_URL);
   await prismaAdmin.$connect();
 
-  const prismaAppManual = new PrismaClient({ datasourceUrl: APP_URL });
+  const prismaAppManual = createClient(PrismaClient, APP_URL);
   await prismaAppManual.$connect();
 
   const context = new TenancyContext();
   const service = new TenancyService(context);
-  const prismaBase = new PrismaClient({ datasourceUrl: APP_URL });
+  const prismaBase = createClient(PrismaClient, APP_URL);
   const prismaWithExt = prismaBase.$extends(createPrismaTenancyExtension(service));
   await prismaWithExt.$connect();
 
