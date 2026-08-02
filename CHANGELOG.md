@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-02
+
 ### Added
 
 - First-class Prisma 7 support with Prisma Config, the `prisma-client` generator, and PostgreSQL driver-adapter E2E coverage.
