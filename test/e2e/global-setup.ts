@@ -9,8 +9,10 @@ export default async function globalSetup() {
   const client = new Client({ connectionString: ADMIN_URL });
   await client.connect();
 
-  const setupSql = fs.readFileSync(path.join(__dirname, 'setup.sql'), 'utf-8');
-  await client.query(setupSql);
-
-  await client.end();
+  try {
+    const setupSql = fs.readFileSync(path.join(__dirname, 'setup.sql'), 'utf-8');
+    await client.query(setupSql);
+  } finally {
+    await client.end();
+  }
 }

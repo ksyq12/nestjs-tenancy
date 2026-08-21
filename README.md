@@ -29,6 +29,7 @@ One line of code. Automatic tenant isolation.
 - **Error hierarchy** — `TenantContextMissingError` base class enables unified `instanceof` catch handling
 - **CLI scaffolding** — `npx @nestarc/tenancy init` generates RLS policies and module config
 - **CLI drift detection** — `npx @nestarc/tenancy check` validates SQL against Prisma schema
+- **Live DB doctor** — `npx @nestarc/tenancy doctor` audits the runtime role, RLS catalogs, policy drift, and optional fail-closed behavior
 - **Multi-schema support** — `@@schema()` directives generate schema-qualified SQL (e.g., `"auth"."users"`)
 - **ccTLD-aware subdomain extraction** — accurate parsing for `.co.uk`, `.co.jp`, `.com.au`, etc.
 - **Framework-agnostic** — public API uses `TenancyRequest` / `TenancyResponse` instead of Express types. Works with Express, Fastify, and raw Node.js HTTP
@@ -1035,6 +1036,31 @@ npx @nestarc/tenancy check --db-setting-key=custom.tenant_key
 ```
 
 Validates table coverage, tenant indexes, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency across all policies. Exits with code 0 (in sync) or 1 (drift detected).
+
+Audit an applied RLS configuration through the same non-superuser database role used by the application:
+
+```bash
+DATABASE_URL='postgresql://app_user:...@localhost/app' \
+  npx @nestarc/tenancy doctor \
+  --table=public.users \
+  --role=app_user
+```
+
+The catalog audit checks the current and login roles, `SUPERUSER` / `BYPASSRLS` and reachable role risks, table ownership, `ENABLE` / `FORCE` / active RLS state, tenant column and index, grants (including forbidden `TRUNCATE`), and the exact generated `USING` / `WITH CHECK` policy contract. Run the command once per tenant-scoped table.
+
+Add an opt-in, read-only behavior probe with two tenant IDs that already have rows:
+
+```bash
+DATABASE_URL='postgresql://app_user:...@localhost/app' \
+  npx @nestarc/tenancy doctor \
+  --table=public.users \
+  --role=app_user \
+  --active \
+  --tenant-a=11111111-1111-1111-1111-111111111111 \
+  --tenant-b=22222222-2222-2222-2222-222222222222
+```
+
+The active probe verifies no-context fail-closed behavior, tenant A/B isolation, and setting cleanup after both COMMIT and ROLLBACK. It does not write data. If either tenant has no visible fixture row, the result is inconclusive rather than a false pass. Add `--json` for machine-readable output. Exit codes are 0 (healthy), 1 (finding or inconclusive probe), and 2 (usage, connection, or query error). Prefer `DATABASE_URL` over `--url` so credentials do not enter shell history or the process list.
 
 ## License
 

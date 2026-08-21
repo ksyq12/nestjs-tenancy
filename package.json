@@ -113,7 +113,6 @@
     "cache-manager": "^7.2.8",
     "eslint": "^10.1.0",
     "jest": "^29.0.0",
-    "pg": "^8.13.0",
     "prisma": "^7.9.1",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.0.0",
@@ -124,6 +123,7 @@
     "typescript-eslint": "^8.57.2"
   },
   "dependencies": {
+    "pg": "^8.13.0",
     "psl": "^1.15.0",
     "prompts": "^2.4.2"
   }

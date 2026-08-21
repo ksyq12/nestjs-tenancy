@@ -1,27 +1,103 @@
-const args = process.argv.slice(2);
-const command = args[0];
-const flags = new Set(args.slice(1));
+import type { DoctorOptions, DoctorResult } from './doctor';
 
-if (command === 'init') {
-  const dryRun = flags.has('--dry-run');
+export interface CliIo {
+  log(message: string): void;
+  error(message: string): void;
+}
 
-  require('./init')
-    .runInit({ dryRun })
-    .catch((err: Error) => {
-      console.error(err.message);
-      process.exit(1);
-    });
-} else if (command === 'check') {
-  const { runCheck } = require('./check');
-  const dbSettingKeyArg = args.find((a: string) => a.startsWith('--db-setting-key='));
-  const dbSettingKey = dbSettingKeyArg ? dbSettingKeyArg.split('=')[1] : undefined;
-  const result = runCheck({ dbSettingKey });
-  process.exit(result.inSync ? 0 : 1);
-} else {
-  console.log('Usage: npx @nestarc/tenancy <command> [options]');
-  console.log('');
-  console.log('Commands:');
-  console.log('  init [--dry-run]                    Scaffold RLS policies and module configuration');
-  console.log('  check [--db-setting-key=<key>]      Check if tenancy-setup.sql is in sync with Prisma schema');
-  process.exit(0);
+export interface CliDependencies {
+  runDoctor?: (options: DoctorOptions) => Promise<DoctorResult>;
+}
+
+const defaultIo: CliIo = {
+  log: (message) => console.log(message),
+  error: (message) => console.error(message),
+};
+
+/** Run the CLI without terminating the process, so async commands can clean up and flush output. */
+export async function runCli(
+  argv: string[] = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+  io: CliIo = defaultIo,
+  dependencies: CliDependencies = {},
+): Promise<number> {
+  const command = argv[0];
+  const args = argv.slice(1);
+  const flags = new Set(args);
+
+  if (command === 'init') {
+    const dryRun = flags.has('--dry-run');
+    try {
+      await require('./init').runInit({ dryRun });
+      return 0;
+    } catch (error) {
+      io.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
+  }
+
+  if (command === 'check') {
+    const { runCheck } = require('./check');
+    const dbSettingKeyArg = args.find((arg: string) => arg.startsWith('--db-setting-key='));
+    const dbSettingKey = dbSettingKeyArg
+      ? dbSettingKeyArg.slice(dbSettingKeyArg.indexOf('=') + 1)
+      : undefined;
+    const result = runCheck({ dbSettingKey });
+    return result.inSync ? 0 : 1;
+  }
+
+  if (command === 'doctor') {
+    const doctor = require('./doctor') as typeof import('./doctor');
+    const parsed = doctor.parseDoctorArgs(args, env);
+    if (parsed.kind === 'help') {
+      io.log(doctor.doctorHelp());
+      return 0;
+    }
+    if (parsed.kind === 'error') {
+      const output = doctor.formatDoctorCliError(parsed.message, parsed.json);
+      if (parsed.json) io.log(output);
+      else {
+        io.error(output);
+        io.log(doctor.doctorHelp());
+      }
+      return doctor.DoctorExitCode.ERROR;
+    }
+
+    const { json, ...options } = parsed.options;
+    const result = await (dependencies.runDoctor ?? doctor.runDoctor)(options);
+    io.log(doctor.formatDoctorResult(result, json));
+    return result.exitCode;
+  }
+
+  io.log(rootHelp());
+  return 0;
+}
+
+export function rootHelp(): string {
+  return [
+    'Usage: npx @nestarc/tenancy <command> [options]',
+    '',
+    'Commands:',
+    '  init [--dry-run]                    Scaffold RLS policies and module configuration',
+    '  check [--db-setting-key=<key>]      Check if tenancy-setup.sql is in sync with Prisma schema',
+    '  doctor --table=<schema.table>       Audit a live database (run doctor --help for options)',
+  ].join('\n');
+}
+
+if (require.main === module) {
+  void runCli().then((exitCode) => {
+    process.exitCode = exitCode;
+  }).catch((error: unknown) => {
+    const json = process.argv.slice(2).includes('--json');
+    if (json) {
+      const doctor = require('./doctor') as typeof import('./doctor');
+      console.log(doctor.formatDoctorCliError(
+        error instanceof Error ? error.message : String(error),
+        true,
+      ));
+    } else {
+      console.error(error instanceof Error ? error.message : String(error));
+    }
+    process.exitCode = 2;
+  });
 }

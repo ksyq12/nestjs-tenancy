@@ -7,8 +7,11 @@ export default async function globalTeardown() {
   const client = new Client({ connectionString: ADMIN_URL });
   await client.connect();
 
-  await client.query('DROP TABLE IF EXISTS users CASCADE');
-  await client.query('DROP TABLE IF EXISTS countries CASCADE');
-
-  await client.end();
+  try {
+    await client.query('DROP TABLE IF EXISTS force_owner_users CASCADE');
+    await client.query('DROP TABLE IF EXISTS users CASCADE');
+    await client.query('DROP TABLE IF EXISTS countries CASCADE');
+  } finally {
+    await client.end();
+  }
 }

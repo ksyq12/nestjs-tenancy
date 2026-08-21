@@ -1,5 +1,8 @@
 # @nestarc/tenancy — Claude Code 인수인계 문서
 
+> [!WARNING]
+> 이 문서는 초기 MVP 설계 시점의 역사적 자료로 현재 패키지 상태와 다릅니다. 패키지 `0.14.0` 기준 최신 검증 결과와 다음 작업 맥락은 [`tenancy-strategy-validation-2026-08-21.md`](./tenancy-strategy-validation-2026-08-21.md)를 먼저 확인하세요.
+
 ## 프로젝트 개요
 
 NestJS용 PostgreSQL 멀티테넌시 모듈. Row Level Security(RLS) + Prisma 기반으로, `TenancyModule.forRoot()` 한 줄이면 멀티테넌시가 적용되는 것을 목표로 한다.

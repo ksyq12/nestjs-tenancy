@@ -5,10 +5,31 @@ import { TenancyService } from '../../src/services/tenancy.service';
 const TENANT_1 = '11111111-1111-1111-1111-111111111111';
 const TENANT_2 = '22222222-2222-2222-2222-222222222222';
 const TENANT_3 = '33333333-3333-3333-3333-333333333333';
+const APP_ROLE = 'app_user';
 
 // Non-superuser connection — RLS applies to this role
 const APP_URL =
   process.env.APP_DATABASE_URL ?? 'postgresql://app_user:app_user@localhost:5433/tenancy_test';
+
+async function selectUsersForTenant(client: Client, tenantId: string) {
+  await client.query('BEGIN');
+
+  try {
+    await client.query(
+      `SELECT set_config('app.current_tenant', $1, true)`,
+      [tenantId],
+    );
+    const result = await client.query<{
+      tenant_id: string;
+      name: string;
+    }>('SELECT tenant_id, name FROM users ORDER BY name');
+    await client.query('COMMIT');
+    return result.rows;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  }
+}
 
 /**
  * E2E tests verifying PostgreSQL RLS with real database.
@@ -30,25 +51,64 @@ describe('PostgreSQL RLS Integration', () => {
     await client.end();
   });
 
-  it('should return only tenant 1 rows with SET LOCAL', async () => {
-    await client.query('BEGIN');
-    await client.query(`SET LOCAL "app.current_tenant" = '${TENANT_1}'`);
-    const result = await client.query('SELECT * FROM users');
-    await client.query('COMMIT');
+  it('should fail closed for app_user without tenant context', async () => {
+    // Use a fresh connection that has never set the custom PostgreSQL setting.
+    const noContextClient = new Client({ connectionString: APP_URL });
+    await noContextClient.connect();
 
-    expect(result.rows).toHaveLength(2);
-    expect(result.rows.every((r: any) => r.tenant_id === TENANT_1)).toBe(true);
-    expect(result.rows.map((r: any) => r.name).sort()).toEqual(['Alice', 'Bob']);
+    try {
+      const identity = await noContextClient.query<{
+        role_name: string;
+        tenant_id: string | null;
+        rolsuper: boolean;
+        rolbypassrls: boolean;
+      }>(
+        `SELECT current_user AS role_name,
+                current_setting('app.current_tenant', true) AS tenant_id,
+                role_info.rolsuper,
+                role_info.rolbypassrls
+           FROM pg_roles AS role_info
+          WHERE role_info.rolname = current_user`,
+      );
+      expect(identity.rows[0]).toEqual({
+        role_name: APP_ROLE,
+        tenant_id: null,
+        rolsuper: false,
+        rolbypassrls: false,
+      });
+
+      const visible = await noContextClient.query<{ count: number }>(
+        'SELECT count(*)::int AS count FROM users',
+      );
+      expect(visible.rows[0].count).toBe(0);
+
+      await expect(
+        noContextClient.query(
+          `INSERT INTO users (tenant_id, name, email)
+           VALUES ($1, 'NoContext', 'no-context@bypass-test.com')`,
+          [TENANT_1],
+        ),
+      ).rejects.toMatchObject({
+        code: '42501',
+        message: expect.stringMatching(/row-level security/i),
+      });
+    } finally {
+      await noContextClient.end();
+    }
   });
 
-  it('should return only tenant 2 rows with SET LOCAL', async () => {
-    await client.query('BEGIN');
-    await client.query(`SET LOCAL "app.current_tenant" = '${TENANT_2}'`);
-    const result = await client.query('SELECT * FROM users');
-    await client.query('COMMIT');
+  it('should actively isolate tenant A and tenant B for app_user', async () => {
+    const tenantARows = await selectUsersForTenant(client, TENANT_1);
+    const tenantBRows = await selectUsersForTenant(client, TENANT_2);
 
-    expect(result.rows).toHaveLength(2);
-    expect(result.rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
+    expect(tenantARows).toEqual([
+      { tenant_id: TENANT_1, name: 'Alice' },
+      { tenant_id: TENANT_1, name: 'Bob' },
+    ]);
+    expect(tenantBRows).toEqual([
+      { tenant_id: TENANT_2, name: 'Charlie' },
+      { tenant_id: TENANT_2, name: 'Diana' },
+    ]);
   });
 
   it('should return only tenant 3 rows (single row)', async () => {
@@ -254,13 +314,72 @@ describe('RLS Bypass Attempts', () => {
     expect(result.rows).toHaveLength(0);
   });
 
-  it('should enforce FORCE ROW LEVEL SECURITY on app_user role', async () => {
-    // Without SET LOCAL, current_setting returns NULL — RLS blocks all rows
-    const result = await client.query('SELECT * FROM users');
-    expect(result.rows).toHaveLength(0);
+  it('should enforce FORCE ROW LEVEL SECURITY for the actual table owner', async () => {
+    const fixture = await adminClient.query<{
+      table_owner: string;
+      relrowsecurity: boolean;
+      relforcerowsecurity: boolean;
+      rolsuper: boolean;
+      rolbypassrls: boolean;
+    }>(
+      `SELECT owner.rolname AS table_owner,
+              table_info.relrowsecurity,
+              table_info.relforcerowsecurity,
+              owner.rolsuper,
+              owner.rolbypassrls
+         FROM pg_class AS table_info
+         JOIN pg_roles AS owner ON owner.oid = table_info.relowner
+        WHERE table_info.oid = 'public.force_owner_users'::regclass`,
+    );
+    expect(fixture.rows[0]).toEqual({
+      table_owner: APP_ROLE,
+      relrowsecurity: true,
+      relforcerowsecurity: true,
+      rolsuper: false,
+      rolbypassrls: false,
+    });
 
-    // Verify this is RLS enforcement, not an empty table (superuser sees all)
-    const adminResult = await adminClient.query('SELECT count(*)::int as cnt FROM users');
-    expect(adminResult.rows[0].cnt).toBeGreaterThanOrEqual(5);
+    // The superuser confirms the fixture contains rows; a fresh app_user
+    // connection then exercises queries as the actual table owner.
+    const adminResult = await adminClient.query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM force_owner_users',
+    );
+    expect(adminResult.rows[0].count).toBe(4);
+
+    const ownerClient = new Client({ connectionString: APP_URL });
+    await ownerClient.connect();
+    try {
+      const identity = await ownerClient.query<{ role_name: string }>(
+        'SELECT current_user AS role_name',
+      );
+      expect(identity.rows[0].role_name).toBe(APP_ROLE);
+
+      const withoutContext = await ownerClient.query<{ count: number }>(
+        'SELECT count(*)::int AS count FROM force_owner_users',
+      );
+      expect(withoutContext.rows[0].count).toBe(0);
+
+      await ownerClient.query('BEGIN');
+      try {
+        await ownerClient.query(
+          `SELECT set_config('app.current_tenant', $1, true)`,
+          [TENANT_1],
+        );
+        const tenantRows = await ownerClient.query<{
+          tenant_id: string;
+          name: string;
+        }>('SELECT tenant_id, name FROM force_owner_users ORDER BY name');
+        expect(tenantRows.rows).toEqual([
+          { tenant_id: TENANT_1, name: 'Owner Alice' },
+          { tenant_id: TENANT_1, name: 'Owner Bob' },
+        ]);
+        await ownerClient.query('COMMIT');
+      } catch (error) {
+        await ownerClient.query('ROLLBACK');
+        throw error;
+      }
+    } finally {
+      await ownerClient.end();
+    }
   });
 });
