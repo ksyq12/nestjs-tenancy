@@ -7,6 +7,7 @@
 - P0/P1 PgBouncer matrix 완료: 2026-08-23 (transaction mode 지원 계약 + Prisma 6/7 실DB lane)
 - P1 transaction API 대표 경로 완료: 2026-08-23 (`maxWait`·failure/custom key/isolation 계약 + transparent mode deprecation)
 - P1 non-HTTP missing-context diagnostics 완료: 2026-08-23 (`ignore | warn | throw` + event/OTel metric + BullMQ/Redis E2E + search contract)
+- P2 Nestarc ecosystem compatibility harness 완료: 2026-08-23 (tarball fixture + API key/RBAC/RLS/outbox/jobs/webhook 실경로 + CI/release gate)
 - 목적: 다음 Codex/개발 세션에서 조사 맥락을 다시 수집하지 않고 구현 우선순위를 바로 결정할 수 있도록 근거와 결론을 보존한다.
 
 ## 1. 검증 대상
@@ -29,13 +30,13 @@
 | --- | --- | --- |
 | 안정적인 interactive transaction API | P1 대표 경로 정리 완료 + 런타임 제약 명시 | public API 기반 `tenancyTransaction()`을 canonical API로 고정하고 `maxWait`·timeout·isolation·custom key·시작/설정 실패 계약을 Prisma 6/7 실DB matrix로 검증했다. transparent mode는 deprecated compatibility 경로다. Prisma 6 `PrismaPg`의 `maxWait` 미시행은 negative contract로 명시한다. |
 | PgBouncer/pool E2E | P0/P1 구현 완료 + 지원 범위 고정 | PgBouncer 1.25.2 transaction mode를 지원 계약으로 정하고, 강제 재사용·교체·동시성·실패 cleanup을 Prisma 6/7 실DB lane에서 검증한다. session mode는 비지원 negative contract다. |
-| 패키지 간 통합 테스트 키트 | 실제 신규 기능 공백 | 현재 `./testing`은 단일 패키지용 helper뿐이다. 공개 Nestarc 저장소에서도 전체 체인의 자동화 테스트를 찾지 못했다. |
+| 패키지 간 통합 테스트 키트 | P2 런타임 하네스 완료 + install metadata 제약 명시 | 독립 fixture가 실제 tarball/published package를 설치하고 API key → tenancy → RBAC → RLS DB → outbox → jobs → webhook을 검증한다. 현재 `@nestarc/api-keys@0.3.0`의 Prisma 5-only optional peer 때문에 strict install은 불가능하고 명시적 `--legacy-peer-deps`가 필요하다. |
 | Redis·검색·queue 누락 진단 | P1 구현 완료 + vendor 범위 명시 | 기본 호환 동작을 보존하는 공통 `ignore | warn | throw` 정책과 event/OTel 진단을 Bull/Kafka/gRPC/cache/Redis/search에 연결했다. BullMQ 6 + Redis 7.4 실환경 lane을 CI/release gate로 추가했고 search는 vendor-neutral adapter contract까지만 보증한다. |
 | 운영 DB `doctor` | P0 구현 완료 + 후속 범위 분리 | live DB catalog/role/policy와 opt-in active fail-closed probe를 구현했다. manifest batch는 후속이며, PgBouncer 재사용은 별도 matrix에서 완료했다. |
 | TypeORM·Drizzle 보류 | 합리적인 전략 결정 | 패키지는 이미 Prisma/PostgreSQL 전용이다. 현재의 문제는 ORM 확장이 아니라 로드맵의 과잉 약속과 핵심 경로의 운영 보증 부족이다. |
 | 자체 수요가 가장 강하고 선점 가능 | 공개 근거 부족 및 일부 반증 | 더 많이 다운로드되는 직접 경쟁 패키지와 Prisma 공식 RLS가 존재한다. 경쟁 우위는 RLS 자체보다 NestJS 운영 통합에서 찾아야 한다. |
 
-핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로, non-HTTP missing-context diagnostics P1을 완료했다. 다음 우선순위는 Nestarc ecosystem compatibility harness다.
+핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로, non-HTTP missing-context diagnostics P1, Nestarc ecosystem compatibility harness P2를 완료했다. 다음 우선순위는 하네스가 드러낸 cross-package peer metadata와 jobs handler 초기화 계약을 각 소유 패키지에서 정리하는 일이다.
 
 ## 3. 검증 방법과 실행 결과
 
@@ -179,6 +180,33 @@ npm audit --json
 - `throw` policy에서 producer 누락은 enqueue 전에 실패하고, raw unscoped job은 consumer resource 접근 전에 실패하는 것을 확인했다.
 - `npm audit`의 10건(2 low, 8 high)은 기존 Nest/Prisma/빌드 도구 전이 의존성에서 보고되며 신규 `bullmq`/`ioredis` 경로는 finding에 포함되지 않았다.
 
+### 3.7 P2 Nestarc ecosystem compatibility harness 구현 후 실행 검증
+
+독립 fixture, tarball 설치 runner, CI/release gate를 추가한 뒤 다음을 실행했다.
+
+```bash
+npm run lint
+npm test -- --runInBand
+npm run test:cov -- --runInBand
+npm run build
+npm run test:e2e:ecosystem
+```
+
+결과:
+
+- lint/build: 통과
+- unit/integration: 47 suites, 554 tests 통과
+- coverage: 전체 statements 99.05%, branches 96.88%, functions 100%, lines 99.21%
+- ecosystem E2E: 1 suite, 3 tests 통과
+- 로컬 검증 환경: Node.js 24.11.1, NestJS 10.4.20, Prisma 6.19.3, PostgreSQL 16.14
+- CI/release lane은 Node.js 22와 PostgreSQL 16에서 같은 명령을 실행하며 release publish의 필수 선행 job이다.
+- 현재 `@nestarc/tenancy@0.14.0`과 로컬 형제 저장소의 `api-keys@0.3.0`, `rbac@0.2.0`, `jobs@0.3.0`, `outbox@0.2.0`, `webhook@0.13.0`을 각각 tarball로 설치해 검증했다. 형제 저장소 탐색을 비활성화해 나머지 5개를 실제 published artifact로 설치하는 CI 경로도 별도로 통과했다.
+- API key로 tenant identity를 결정하고 선택적 `X-Tenant-Id` assertion의 불일치를 403으로 차단했다. 같은 identity가 tenancy ALS, RBAC subject/tenant, Prisma transaction-local RLS setting에 사용되는 것을 확인했다.
+- tenant A/B가 각각 자기 RLS row만 조회하고, outbox record의 tenant가 jobs context로 복원되며, webhook event/endpoint filtering과 서명된 실제 HTTP delivery가 해당 tenant 수신 경로에만 도달하는 것을 확인했다.
+- API key 누락, API key와 asserted tenant 불일치, RBAC role 누락은 모두 project/outbox/webhook side effect 이전에 실패했다.
+- strict `npm install`은 `@nestarc/api-keys@0.3.0`의 optional `@prisma/client@^5` peer와 나머지 그래프의 Prisma 6 계약 충돌로 `ERESOLVE`한다. fixture는 이 알려진 metadata 제약을 숨기지 않고 `--legacy-peer-deps`를 명시하며 API keys Prisma adapter를 사용하지 않은 runtime graph를 검증한다.
+- `@nestarc/jobs` decorator handler를 같은 상위 fixture module에서 자동 발견할 때 provider 의존성이 초기화되기 전 instance가 등록되는 순서를 관찰했다. 하네스는 공개 `HandlerRegistry`에 app init 이후 handler를 등록해 deterministic runtime contract를 사용한다.
+
 ## 4. 상세 검증 결과
 
 ### 4.1 Interactive transaction: P1 대표 경로 정리 완료
@@ -281,40 +309,53 @@ startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__interna
 
 이 결과는 최초 문서의 “현재 leak 확인”이 아니라 “production claim을 뒷받침할 matrix 부재”였던 공백을 닫는다. 다만 transparent mode의 Prisma 내부 API 의존 위험과 managed pooler별 구성 차이는 별도 잔여 위험이다.
 
-### 4.3 Cross-package integration kit: ecosystem 수준 신규 기능
+### 4.3 Cross-package integration kit: P2 런타임 하네스 완료
 
-현재 `@nestarc/tenancy/testing`은 다음 세 API만 공개한다.
+`@nestarc/tenancy/testing`의 기존 단일 패키지 helper 세 개는 그대로 유지한다.
 
 - `TestTenancyModule`
 - `withTenant`
 - `expectTenantIsolation`
 
-근거:
+ecosystem 패키지를 `tenancy` runtime dependency로 추가하지 않았다. 대신 [`test/ecosystem/fixture`](../test/ecosystem/fixture/)를 자체 `package.json`, TypeScript/Jest/Prisma 설정을 가진 독립 consumer application으로 두었다.
 
-- testing barrel: [`src/testing/index.ts`](../src/testing/index.ts#L1)
-- test module providers: [`src/testing/test-tenancy.module.ts`](../src/testing/test-tenancy.module.ts#L38)
-- Prisma `findMany()` 기반 isolation helper: [`src/testing/expect-tenant-isolation.ts`](../src/testing/expect-tenant-isolation.ts#L25)
+대표 명령 [`npm run test:e2e:ecosystem`](../package.json)은 다음 순서로 실행된다.
 
-현재 package dependency/peer dependency에는 다른 `@nestarc/*` 패키지가 없고, E2E도 Prisma/PostgreSQL만 다룬다.
-
-- [`package.json`](../package.json#L71)
-- [`test/e2e/jest.e2e.config.ts`](../test/e2e/jest.e2e.config.ts#L3)
-
-2026-08-21 공개 GitHub 조직 검색에서도 다음 자동화 체인을 찾지 못했다.
+1. 현재 `dist`에서 `@nestarc/tenancy` tarball을 만든다.
+2. 로컬 형제 Nestarc 저장소와 빌드 산출물이 있으면 해당 package도 tarball로 만든다.
+3. 형제 저장소가 없는 CI에서는 fixture에 고정된 published version을 사용한다.
+4. fixture 전체를 임시 디렉터리로 복사하고 package spec을 tarball absolute path로 교체한다.
+5. 독립 `node_modules`를 설치하고 Prisma 6 client를 생성한다.
+6. PostgreSQL schema/RLS fixture, Nest application, 실제 HTTP webhook receiver를 실행한다.
 
 ```text
-api-keys → tenancy → rbac → jobs/outbox/webhook
+api-keys → tenancy ALS → rbac → Prisma/RLS + outbox → jobs → webhook HTTP
 ```
 
-이는 `tenancy` runtime에 모두 의존시키는 기능보다 별도 compatibility repository 또는 fixture application으로 두는 편이 적절하다. 실제 transport와 각 패키지를 설치한 상태에서 다음을 검증해야 한다.
+검증된 계약:
 
-1. API key가 tenant identity를 결정한다.
-2. tenancy context가 HTTP에서 생성된다.
-3. RBAC가 동일 tenant context로 authorization한다.
-4. job/outbox/webhook payload에 tenant가 전파된다.
-5. consumer가 context를 복원한다.
-6. tenant 누락·불일치가 fail-closed 또는 명시적 policy에 따라 처리된다.
-7. 다른 tenant의 데이터와 side effect가 관찰되지 않는다.
+1. 실제 `ApiKeysService`가 API key의 tenant identity를 결정한다.
+2. tenancy HTTP middleware가 그 identity로 ALS context를 생성하고 asserted tenant mismatch를 거부한다.
+3. RBAC가 API key subject와 같은 tenant의 role/permission을 평가한다.
+4. `tenancyTransaction()`이 Prisma transaction-local RLS setting을 적용하고 project row와 outbox row를 원자적으로 기록한다.
+5. outbox publisher가 record tenant/correlation을 jobs envelope에 넣고 consumer context runner가 ALS를 복원한다.
+6. webhook service가 tenant endpoint만 선택하고 worker가 HMAC 서명된 실제 HTTP request를 전송한다.
+7. tenant A/B의 DB row, job context, webhook event와 외부 side effect가 서로 섞이지 않는다.
+8. missing identity, tenant mismatch, RBAC deny는 data/side effect 이전에 fail-closed한다.
+
+구현 근거:
+
+- runner: [`scripts/test-ecosystem-e2e.js`](../scripts/test-ecosystem-e2e.js)
+- 독립 fixture: [`test/ecosystem/fixture`](../test/ecosystem/fixture/)
+- runner unit contract: [`test/cli/ecosystem-e2e-runner.spec.ts`](../test/cli/ecosystem-e2e-runner.spec.ts)
+- CI/release gate: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml), [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+
+잔여 제약:
+
+- clean strict install은 아직 보증하지 않는다. `@nestarc/api-keys@0.3.0`의 optional Prisma peer를 최소 `^5 || ^6`으로 정리하고 `--legacy-peer-deps`를 제거해야 package metadata compatibility까지 완료된다.
+- 현재 cross-package runtime lane은 모든 패키지의 교집합인 NestJS 10 + Prisma 6이다. Prisma 7 전체 ecosystem lane은 api-keys/rbac/outbox/webhook의 peer 및 runtime 지원이 먼저 필요하다.
+- jobs consumer는 공개 `HandlerRegistry`를 app init 이후 사용한다. decorator auto-discovery가 상위 module provider의 DI 완료 전에 instance를 캡처하는 초기화 순서는 jobs package에서 별도 회귀 계약으로 정리해야 한다.
+- in-memory jobs backend를 사용하지만 outbox persistence, Prisma/RLS DB, webhook persistence/worker/HTTP transport는 실제 구현이다. Redis/BullMQ 내구성은 별도 P1 Redis lane이 담당한다.
 
 ### 4.4 Redis·검색·queue context 누락 진단: P1 구현 완료
 
@@ -563,12 +604,14 @@ TypeORM·Drizzle·MikroORM은 실제 구현이 아니라 roadmap/research에만 
 3. ✅ 실제 BullMQ 6/Redis 7.4 E2E와 CI/release gate를 만들었다.
 4. ✅ vendor-neutral search adapter contract와 adapter 미호출 누락 계약을 정의했다.
 
-### P2 — Nestarc ecosystem compatibility harness
+### P2 — Nestarc ecosystem compatibility harness ✅ 런타임 완료 (2026-08-23)
 
-1. 별도 fixture application/repository에 둔다.
-2. 실제 package tarball 또는 published version을 설치해 검증한다.
-3. API key → RBAC → DB → job/outbox → webhook 전체 context propagation을 검사한다.
-4. cross-tenant data와 side effect가 모두 차단되는지 검증한다.
+1. ✅ 독립 fixture application을 만들고 `tenancy` runtime dependency와 분리했다.
+2. ✅ 실제 package tarball 또는 고정 published version을 독립 `node_modules`에 설치한다.
+3. ✅ API key → tenancy → RBAC → RLS DB/outbox → jobs → webhook 전체 context propagation을 검사한다.
+4. ✅ cross-tenant data와 실제 HTTP side effect가 모두 분리되는지 검증한다.
+5. ✅ CI/release publish gate에 Node 22 ecosystem job을 추가했다.
+6. ⚠️ API keys의 Prisma peer metadata 때문에 clean strict install은 미완료이며 명시적 workaround를 사용한다.
 
 ### 보류 — TypeORM·Drizzle
 
@@ -583,11 +626,11 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 3. 기준 커밋 `2fe5288` 이후 transaction, CLI, E2E, CI 변경 여부를 diff한다.
 4. 구현 요청이 아니라 재검증 요청이면 전체 unit/build/lint/direct E2E와 Prisma 6/7 PgBouncer E2E를 다시 실행한다.
 5. 시장 판단이 필요하면 npm 수치와 Prisma/Yates/UseBetter 상태를 다시 조회한다.
-6. 다음 구현 작업은 Nestarc ecosystem compatibility harness에서 독립 fixture 범위를 선택한다.
+6. 다음 구현 작업은 `@nestarc/api-keys`의 Prisma peer metadata와 `@nestarc/jobs` handler discovery 초기화 계약을 각 저장소에서 수정한 뒤 하네스 workaround를 제거한다.
 
-추천 첫 구현 작업:
+추천 후속 구현 작업:
 
-> 별도 fixture application에서 API key → tenancy context → RBAC → DB → job/outbox/webhook의 최소 cross-package contract를 정의하고, 실제 package tarball 설치부터 시작한다.
+> `@nestarc/api-keys@0.3.0`의 optional Prisma peer를 실제 지원 범위로 넓히고 `@nestarc/jobs` decorator handler의 상위 module DI 초기화 순서를 회귀 테스트한 뒤, ecosystem fixture의 `--legacy-peer-deps`와 manual `HandlerRegistry` workaround를 제거한다.
 
 ## 8. 세션 재개용 짧은 프롬프트
 
@@ -596,6 +639,7 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 ```text
 docs/tenancy-strategy-validation-2026-08-21.md를 읽고 현재 HEAD와 차이를 확인한 뒤,
 완료된 live DB doctor/RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로,
-non-HTTP missing-context diagnostics P1의 회귀를 보존하면서 ecosystem compatibility harness의 다음 작업을 구현해 주세요.
+non-HTTP missing-context diagnostics P1과 ecosystem compatibility harness P2의 회귀를 보존하면서
+api-keys Prisma peer metadata 또는 jobs handler discovery workaround 중 다음 작업을 구현해 주세요.
 시장 수치는 스냅샷이므로 구현 판단에 필요할 때만 최신화하세요.
 ```

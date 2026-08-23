@@ -44,6 +44,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:e2e": "node scripts/test-e2e.js",
+    "test:e2e:ecosystem": "npm run build && node scripts/test-ecosystem-e2e.js",
     "test:e2e:redis": "node scripts/test-redis-e2e.js",
     "test:e2e:pgbouncer": "node scripts/test-pgbouncer-e2e.js",
     "bench": "npx ts-node benchmarks/rls-overhead.ts",

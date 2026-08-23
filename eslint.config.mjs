@@ -19,6 +19,7 @@ export default tseslint.config(
       'coverage/',
       'test/e2e/generated/',
       'test/e2e/generated-v6-native/',
+      'test/ecosystem/fixture/',
       'node_modules/',
     ],
   },

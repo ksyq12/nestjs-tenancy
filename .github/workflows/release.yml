@@ -92,8 +92,36 @@ jobs:
         env:
           REDIS_URL: redis://127.0.0.1:6380
 
+  ecosystem-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tenancy
+          POSTGRES_PASSWORD: tenancy
+          POSTGRES_DB: tenancy_test
+        ports:
+          - 5433:5432
+        options: --health-cmd "pg_isready -U tenancy" --health-interval 2s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run test:e2e:ecosystem
+        env:
+          ECOSYSTEM_SKIP_DOCKER: '1'
+          DATABASE_URL: postgresql://tenancy:tenancy@127.0.0.1:5433/tenancy_test
+          APP_DATABASE_URL: postgresql://ecosystem_app:ecosystem_app@127.0.0.1:5433/tenancy_test
+
   publish:
-    needs: [test, e2e, pgbouncer-e2e, redis-e2e]
+    needs: [test, e2e, pgbouncer-e2e, redis-e2e, ecosystem-e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read
