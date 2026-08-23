@@ -7,6 +7,15 @@ import {
 import { Observable, Subscription } from 'rxjs';
 import { TenancyContext } from '../services/tenancy-context';
 import { DEFAULT_PROPAGATION_HEADER, DEFAULT_BULL_DATA_KEY, DEFAULT_GRPC_METADATA_KEY } from '../tenancy.constants';
+import type { TenantContextDiagnostics } from '../diagnostics/tenant-context-diagnostics';
+
+type RpcTransport = 'kafka' | 'bull' | 'grpc';
+
+interface TenantContextInterceptorDiagnosticOptions {
+  diagnostics?: TenantContextDiagnostics;
+  /** Stable topic, queue, service, or handler name included in diagnostics. */
+  resource?: string;
+}
 
 /**
  * Options for `TenantContextInterceptor`.
@@ -15,10 +24,12 @@ import { DEFAULT_PROPAGATION_HEADER, DEFAULT_BULL_DATA_KEY, DEFAULT_GRPC_METADAT
  * When `transport` is omitted, all keys are available for duck-typing fallback.
  */
 export type TenantContextInterceptorOptions =
+  TenantContextInterceptorDiagnosticOptions & (
   | { transport: 'kafka'; kafkaHeaderName?: string }
   | { transport: 'bull'; bullDataKey?: string }
   | { transport: 'grpc'; grpcMetadataKey?: string }
-  | { transport?: undefined; kafkaHeaderName?: string; bullDataKey?: string; grpcMetadataKey?: string };
+  | { transport?: undefined; kafkaHeaderName?: string; bullDataKey?: string; grpcMetadataKey?: string }
+  );
 
 /**
  * NestJS interceptor that restores tenant context from incoming microservice messages.
@@ -52,7 +63,9 @@ export class TenantContextInterceptor implements NestInterceptor {
   private readonly kafkaHeaderName: string;
   private readonly bullDataKey: string;
   private readonly grpcMetadataKey: string;
-  private readonly transport?: 'kafka' | 'bull' | 'grpc';
+  private readonly transport?: RpcTransport;
+  private readonly diagnostics?: TenantContextDiagnostics;
+  private readonly resource?: string;
 
   constructor(
     private readonly context: TenancyContext,
@@ -62,18 +75,31 @@ export class TenantContextInterceptor implements NestInterceptor {
     // but internally we read every key with defaults.
     const opts = (options ?? {}) as {
       kafkaHeaderName?: string; bullDataKey?: string;
-      grpcMetadataKey?: string; transport?: 'kafka' | 'bull' | 'grpc';
+      grpcMetadataKey?: string; transport?: RpcTransport;
+      diagnostics?: TenantContextDiagnostics; resource?: string;
     };
     this.kafkaHeaderName = opts.kafkaHeaderName ?? DEFAULT_PROPAGATION_HEADER;
     this.bullDataKey = opts.bullDataKey ?? DEFAULT_BULL_DATA_KEY;
     this.grpcMetadataKey = opts.grpcMetadataKey ?? DEFAULT_GRPC_METADATA_KEY;
     this.transport = opts.transport;
+    this.diagnostics = opts.diagnostics;
+    this.resource = opts.resource;
   }
 
   intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown> {
     const tenantId = this.extractTenantId(executionContext);
 
     if (!tenantId) {
+      const transport = executionContext.getType() === 'rpc'
+        ? this.transport ?? this.detectTransport(executionContext)
+        : null;
+      if (transport) {
+        this.diagnostics?.report({
+          transport,
+          operation: 'consume',
+          ...(this.resource ? { resource: this.resource } : {}),
+        });
+      }
       return next.handle();
     }
 
@@ -140,6 +166,27 @@ export class TenantContextInterceptor implements NestInterceptor {
       return this.extractFromBullData(data as Record<string, unknown>);
     }
 
+    return null;
+  }
+
+  private detectTransport(executionContext: ExecutionContext): RpcTransport | null {
+    if (executionContext.getType() !== 'rpc') return null;
+
+    const rpcContext = executionContext.switchToRpc();
+    const data = rpcContext.getData();
+    const ctx = rpcContext.getContext();
+
+    if (typeof ctx?.getMessage === 'function') return 'kafka';
+    if (typeof ctx?.get === 'function' && typeof ctx?.set === 'function') {
+      return 'grpc';
+    }
+    if (
+      data &&
+      typeof data === 'object' &&
+      this.bullDataKey in (data as Record<string, unknown>)
+    ) {
+      return 'bull';
+    }
     return null;
   }
 

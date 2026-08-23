@@ -6,6 +6,7 @@ import { SHARED_TENANT_CACHE_KEY } from '../tenancy.constants';
 import { TenancyContext } from '../services/tenancy-context';
 import { TENANT_CACHE_INTERCEPTOR_OPTIONS } from './tenant-cache.constants';
 import { TenantCacheInterceptorOptions } from './tenant-cache-options.interface';
+import { TenantContextDiagnostics } from '../diagnostics/tenant-context-diagnostics';
 
 type BaseCacheKey = Promise<string | undefined | null> | string | undefined | null;
 
@@ -15,6 +16,8 @@ export class TenantCacheInterceptor extends CacheInterceptor {
   private readonly sharedPrefix: string;
   private readonly separator: string;
   private readonly hashTenantId: boolean;
+  private readonly diagnostics?: TenantContextDiagnostics;
+  private readonly resource?: string;
 
   constructor(
     @Inject(CACHE_MANAGER)
@@ -23,12 +26,16 @@ export class TenantCacheInterceptor extends CacheInterceptor {
     @Optional()
     @Inject(TENANT_CACHE_INTERCEPTOR_OPTIONS)
     options?: TenantCacheInterceptorOptions,
+    @Optional()
+    diagnostics?: TenantContextDiagnostics,
   ) {
     super(cacheManager, reflector);
     this.tenantPrefix = options?.tenantPrefix ?? 'tenant';
     this.sharedPrefix = options?.sharedPrefix ?? 'shared';
     this.separator = options?.separator ?? ':';
     this.hashTenantId = options?.hashTenantId ?? false;
+    this.diagnostics = options?.diagnostics ?? diagnostics;
+    this.resource = options?.resource;
   }
 
   protected getBaseCacheKey(context: ExecutionContext): BaseCacheKey {
@@ -47,6 +54,11 @@ export class TenantCacheInterceptor extends CacheInterceptor {
 
     const tenantId = TenancyContext.getCurrentTenantId();
     if (!tenantId) {
+      this.diagnostics?.report({
+        transport: 'cache',
+        operation: 'cache',
+        ...(this.resource ? { resource: this.resource } : {}),
+      });
       return undefined;
     }
 

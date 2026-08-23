@@ -1,5 +1,6 @@
 import { TenancyContext } from '../src/services/tenancy-context';
 import { BullTenantPropagator } from '../src/propagation/bull-tenant-propagator';
+import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 describe('BullTenantPropagator', () => {
   let context: TenancyContext;
@@ -31,6 +32,19 @@ describe('BullTenantPropagator', () => {
       const propagator = new BullTenantPropagator(context);
       const data = { orderId: '123' };
       expect(propagator.inject(data)).toBe(data);
+    });
+
+    it('should diagnose missing producer context with queue resource', () => {
+      const onMissing = jest.fn();
+      const propagator = new BullTenantPropagator(context, {
+        resource: 'orders',
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      expect(propagator.inject({ orderId: '123' })).toEqual({ orderId: '123' });
+      expect(onMissing).toHaveBeenCalledWith({
+        transport: 'bull', operation: 'inject', resource: 'orders',
+      });
     });
 
     it('should not mutate original job data', (done) => {
@@ -89,6 +103,18 @@ describe('BullTenantPropagator', () => {
     it('should return null when key is missing', () => {
       const propagator = new BullTenantPropagator(context);
       expect(propagator.extract({ orderId: '123' })).toBeNull();
+    });
+
+    it('should diagnose missing consumer carrier context', () => {
+      const onMissing = jest.fn();
+      const propagator = new BullTenantPropagator(context, {
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      expect(propagator.extract({ orderId: '123' })).toBeNull();
+      expect(onMissing).toHaveBeenCalledWith({
+        transport: 'bull', operation: 'extract',
+      });
     });
 
     it('should return null when value is not a string', () => {

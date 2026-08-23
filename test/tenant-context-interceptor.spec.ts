@@ -2,6 +2,7 @@ import { CallHandler, ExecutionContext } from '@nestjs/common';
 import { Observable, of, Subscription } from 'rxjs';
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenantContextInterceptor } from '../src/propagation/tenant-context.interceptor';
+import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 function createMockCallHandler(returnValue: unknown = 'result'): CallHandler {
   return { handle: () => of(returnValue) };
@@ -101,6 +102,24 @@ describe('TenantContextInterceptor', () => {
       interceptor.intercept(execCtx, handler).subscribe({
         next: (val) => expect(val).toBe('result'),
         complete: () => done(),
+      });
+    });
+
+    it('should not diagnose HTTP even when an RPC transport option is configured', (done) => {
+      const onMissing = jest.fn();
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'bull',
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      configuredInterceptor.intercept(
+        createHttpContext({}),
+        createMockCallHandler('result'),
+      ).subscribe({
+        complete: () => {
+          expect(onMissing).not.toHaveBeenCalled();
+          done();
+        },
       });
     });
   });
@@ -222,6 +241,42 @@ describe('TenantContextInterceptor', () => {
       grpcInterceptor.intercept(execCtx, handler).subscribe({
         complete: () => done(),
       });
+    });
+
+    it('should diagnose a missing Bull consumer context and continue on warn', (done) => {
+      const onMissing = jest.fn();
+      const bullInterceptor = new TenantContextInterceptor(context, {
+        transport: 'bull',
+        resource: 'orders',
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      bullInterceptor.intercept(
+        createBullContext({ orderId: '123' }),
+        createMockCallHandler('ok'),
+      ).subscribe({
+        next: (value) => expect(value).toBe('ok'),
+        complete: () => {
+          expect(onMissing).toHaveBeenCalledWith({
+            transport: 'bull', operation: 'consume', resource: 'orders',
+          });
+          done();
+        },
+      });
+    });
+
+    it('should reject before invoking a Kafka handler on throw', () => {
+      const handle = jest.fn(() => of('should-not-run'));
+      const kafkaInterceptor = new TenantContextInterceptor(context, {
+        transport: 'kafka',
+        diagnostics: new TenantContextDiagnostics({ policy: 'throw' }),
+      });
+
+      expect(() => kafkaInterceptor.intercept(
+        createKafkaContext({}),
+        { handle },
+      )).toThrow('Tenant context is missing during kafka.consume');
+      expect(handle).not.toHaveBeenCalled();
     });
   });
 

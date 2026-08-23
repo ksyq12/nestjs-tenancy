@@ -1,5 +1,13 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
-import type { Attributes, ContextAPI, Span, TraceAPI, Tracer } from '@opentelemetry/api';
+import type {
+  Attributes,
+  ContextAPI,
+  Counter,
+  Span,
+  TraceAPI,
+  Tracer,
+} from '@opentelemetry/api';
+import type { MissingTenantContextDiagnostic } from '../diagnostics/tenant-context-diagnostics';
 import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
 
@@ -18,6 +26,7 @@ export class TenancyTelemetryService implements OnModuleInit {
   private traceApi: TraceAPI | null = null;
   private contextApi: Pick<ContextAPI, 'active' | 'with'> | null = null;
   private tracer: Tracer | null = null;
+  private missingContextCounter: Counter | null = null;
   private readonly spanAttributeKey: string;
   private readonly createSpans: boolean;
 
@@ -35,6 +44,11 @@ export class TenancyTelemetryService implements OnModuleInit {
       this.traceApi = api.trace;
       this.contextApi = api.context;
       this.tracer = api.trace.getTracer('@nestarc/tenancy');
+      this.missingContextCounter = api.metrics
+        .getMeter('@nestarc/tenancy')
+        .createCounter('nestarc.tenancy.missing_context', {
+          description: 'Missing tenant context occurrences outside HTTP requests',
+        });
     } catch {
       // @opentelemetry/api not installed — telemetry silently skipped
     }
@@ -45,6 +59,23 @@ export class TenancyTelemetryService implements OnModuleInit {
     if (!this.traceApi) return;
     const span = this.traceApi.getActiveSpan();
     span?.setAttribute(this.spanAttributeKey, tenantId);
+  }
+
+  /** Record a non-HTTP missing-context span event and metric counter. */
+  recordMissingContext(diagnostic: MissingTenantContextDiagnostic): void {
+    const attributes: Attributes = {
+      'tenant.transport': diagnostic.transport,
+      'tenant.operation': diagnostic.operation,
+      ...(diagnostic.resource
+        ? { 'tenant.resource': diagnostic.resource }
+        : {}),
+    };
+
+    this.traceApi?.getActiveSpan()?.addEvent(
+      'tenant.context_missing',
+      attributes,
+    );
+    this.missingContextCounter?.add(1, attributes);
   }
 
   /** Start a custom span (only when createSpans is true). Returns null if disabled or OTel unavailable. */

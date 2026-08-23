@@ -665,7 +665,7 @@ class TenantLogger {
 }
 ```
 
-Events: `tenant.resolved`, `tenant.not_found`, `tenant.extraction_failed`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`.
+Events: `tenant.resolved`, `tenant.not_found`, `tenant.extraction_failed`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`, `tenant.context_missing`.
 
 If `@nestjs/event-emitter` is not installed, events are silently skipped — no errors.
 
@@ -852,6 +852,52 @@ Supported transports: `'kafka'` | `'bull'` | `'grpc'`.
 | `kafkaHeaderName` | `string` | `'X-Tenant-Id'` | Kafka message header name |
 | `bullDataKey` | `string` | `'__tenantId'` | Bull job data key |
 | `grpcMetadataKey` | `string` | `'x-tenant-id'` | gRPC metadata key |
+
+### Non-HTTP Missing-Context Diagnostics
+
+The default policy is `ignore`, which preserves the existing pass-through behavior. Opt in at module level with `warn` for observation or `throw` to fail closed:
+
+```typescript
+TenancyModule.forRoot({
+  tenantExtractor: 'X-Tenant-Id',
+  missingContext: { policy: 'warn' }, // 'ignore' | 'warn' | 'throw'
+});
+```
+
+Resolve the configured diagnostics object when constructing transport propagators manually. Use a stable, low-cardinality `resource` such as a queue, topic, service, cache, or index name:
+
+```typescript
+import {
+  BullTenantPropagator,
+  TenantContextDiagnostics,
+  TenancyContext,
+} from '@nestarc/tenancy';
+
+const diagnostics = app.get(TenantContextDiagnostics);
+const propagator = new BullTenantPropagator(new TenancyContext(), {
+  diagnostics,
+  resource: 'orders',
+});
+```
+
+`warn` and `throw` both emit `tenant.context_missing`, add a `tenant.context_missing` event to the active OpenTelemetry span, and increment `nestarc.tenancy.missing_context`. Telemetry attributes are `tenant.transport`, `tenant.operation`, and optional `tenant.resource`. The `throw` policy raises `TenantContextMissingError` after reporting. HTTP extraction is intentionally outside this policy because middleware and `TenancyGuard` already define its fail-closed contract.
+
+The same diagnostics object can be supplied to `TenantContextInterceptor`, `TenantCacheInterceptor`, `TenantResourceKey`, and `TenantSearch`. `TenantResourceKey` creates collision-safe Redis/search keys, while `TenantSearch` is a vendor-neutral adapter boundary that never invokes the adapter without tenant scope:
+
+```typescript
+const keys = new TenantResourceKey(new TenancyContext(), {
+  transport: 'redis',
+  resource: 'response-cache',
+  diagnostics,
+});
+
+const search = new TenantSearch(new TenancyContext(), searchAdapter, {
+  index: 'products',
+  diagnostics,
+});
+```
+
+With `ignore` or `warn`, a missing resource key/search scope returns `null` and no Redis/search operation is performed. With `throw`, it fails before the adapter or resource is accessed.
 
 ## Tenant-Aware Caching
 

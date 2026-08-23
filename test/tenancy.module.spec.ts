@@ -8,6 +8,7 @@ import { TenancyService } from '../src/services/tenancy.service';
 import { TenancyEventService } from '../src/events/tenancy-event.service';
 import { TenancyModuleOptionsFactory } from '../src/interfaces/tenancy-module-options.interface';
 import { TENANCY_MODULE_OPTIONS } from '../src/tenancy.constants';
+import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 describe('TenancyModule', () => {
   it('should choose the legacy wildcard route path for NestJS 10', () => {
@@ -59,6 +60,18 @@ describe('TenancyModule', () => {
 
       const eventService = module.get(TenancyEventService);
       expect(eventService).toBeDefined();
+    });
+
+    it('should configure and export non-HTTP missing-context diagnostics', async () => {
+      const module = await Test.createTestingModule({
+        imports: [TenancyModule.forRoot({
+          tenantExtractor: 'x-tenant-id',
+          missingContext: { policy: 'throw' },
+        })],
+      }).compile();
+
+      const diagnostics = module.get(TenantContextDiagnostics);
+      expect(diagnostics.policy).toBe('throw');
     });
   });
 

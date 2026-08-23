@@ -2,6 +2,7 @@ import type { FactoryProvider, Type } from '@nestjs/common';
 import type { ModuleMetadata } from '@nestjs/common/interfaces';
 import { TenancyRequest, TenancyResponse } from './tenancy-request.interface';
 import { TenantExtractor } from './tenant-extractor.interface';
+import type { TenantContextDiagnosticsOptions } from '../diagnostics/tenant-context-diagnostics';
 
 export interface TelemetryOptions {
   /** Span attribute key for tenant ID. @default 'tenant.id' */
@@ -86,6 +87,12 @@ export interface TenancyModuleOptions {
    * Silently ignored if `@opentelemetry/api` is not installed.
    */
   telemetry?: TelemetryOptions;
+
+  /**
+   * Opt-in diagnostics for missing tenant context outside HTTP requests.
+   * The default `ignore` policy preserves existing pass-through behavior.
+   */
+  missingContext?: TenantContextDiagnosticsOptions;
 }
 
 export interface TenancyModuleOptionsFactory {

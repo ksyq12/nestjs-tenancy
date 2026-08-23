@@ -1,5 +1,6 @@
 import { TenancyContext } from '../src/services/tenancy-context';
 import { GrpcTenantPropagator, GrpcMetadataLike } from '../src/propagation/grpc-tenant-propagator';
+import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 /** Mock gRPC Metadata that matches the structural type. */
 function createMockMetadata(): GrpcMetadataLike & { store: Map<string, (string | Buffer)[]> } {
@@ -52,6 +53,19 @@ describe('GrpcTenantPropagator', () => {
       expect(metadata.store.size).toBe(0);
     });
 
+    it('should diagnose missing client context', () => {
+      const onMissing = jest.fn();
+      const propagator = new GrpcTenantPropagator(context, {
+        resource: 'orders.Process',
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      propagator.inject(createMockMetadata());
+      expect(onMissing).toHaveBeenCalledWith({
+        transport: 'grpc', operation: 'inject', resource: 'orders.Process',
+      });
+    });
+
     it('should return metadata unchanged inside withoutTenant()', async () => {
       const propagator = new GrpcTenantPropagator(context);
       const metadata = createMockMetadata();
@@ -88,6 +102,18 @@ describe('GrpcTenantPropagator', () => {
       const propagator = new GrpcTenantPropagator(context);
       const metadata = createMockMetadata();
       expect(propagator.extract(metadata)).toBeNull();
+    });
+
+    it('should diagnose missing server metadata context', () => {
+      const onMissing = jest.fn();
+      const propagator = new GrpcTenantPropagator(context, {
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      expect(propagator.extract(createMockMetadata())).toBeNull();
+      expect(onMissing).toHaveBeenCalledWith({
+        transport: 'grpc', operation: 'extract',
+      });
     });
 
     it('should return null for empty Buffer', () => {

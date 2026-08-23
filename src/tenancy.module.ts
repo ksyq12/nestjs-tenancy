@@ -20,6 +20,7 @@ import { TenancyGuard } from './guards/tenancy.guard';
 import { TenancyEventService } from './events/tenancy-event.service';
 import { TenancyTelemetryService } from './telemetry/tenancy-telemetry.service';
 import { TENANCY_MODULE_OPTIONS } from './tenancy.constants';
+import { TenantContextDiagnostics } from './diagnostics/tenant-context-diagnostics';
 
 function getNestMajorVersion(): number | null {
   try {
@@ -83,9 +84,32 @@ export class TenancyModule implements NestModule {
         TenancyService,
         TenancyEventService,
         TenancyTelemetryService,
+        {
+          provide: TenantContextDiagnostics,
+          useFactory: (
+            options: TenancyModuleOptions,
+            eventService: TenancyEventService,
+            telemetryService: TenancyTelemetryService,
+          ) => new TenantContextDiagnostics(
+            options.missingContext,
+            eventService,
+            telemetryService,
+          ),
+          inject: [
+            TENANCY_MODULE_OPTIONS,
+            TenancyEventService,
+            TenancyTelemetryService,
+          ],
+        },
         { provide: APP_GUARD, useClass: TenancyGuard },
       ],
-      exports: [TenancyService, TenancyEventService, TenancyTelemetryService, TENANCY_MODULE_OPTIONS],
+      exports: [
+        TenancyService,
+        TenancyEventService,
+        TenancyTelemetryService,
+        TenantContextDiagnostics,
+        TENANCY_MODULE_OPTIONS,
+      ],
     };
   }
 

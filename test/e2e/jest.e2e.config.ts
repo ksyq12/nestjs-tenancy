@@ -4,7 +4,10 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '../..',
   testRegex: 'test/e2e/.*\\.e2e-spec\\.ts$',
-  testPathIgnorePatterns: ['<rootDir>/test/e2e/pgbouncer/'],
+  testPathIgnorePatterns: [
+    '<rootDir>/test/e2e/pgbouncer/',
+    '<rootDir>/test/e2e/redis/',
+  ],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',

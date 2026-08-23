@@ -8,6 +8,15 @@ export type {
   TelemetryOptions,
 } from './interfaces/tenancy-module-options.interface';
 
+// Non-HTTP diagnostics
+export { TenantContextDiagnostics } from './diagnostics/tenant-context-diagnostics';
+export type {
+  MissingTenantContextDiagnostic,
+  MissingTenantContextPolicy,
+  TenantContextDiagnosticOperation,
+  TenantContextDiagnosticsOptions,
+} from './diagnostics/tenant-context-diagnostics';
+
 // Services
 export { TenancyService } from './services/tenancy.service';
 export { TenancyContext } from './services/tenancy-context';
@@ -55,6 +64,16 @@ export { GrpcTenantPropagator } from './propagation/grpc-tenant-propagator';
 export type { GrpcPropagationOptions, GrpcMetadataLike } from './propagation/grpc-tenant-propagator';
 export { TenantContextInterceptor } from './propagation/tenant-context.interceptor';
 export type { TenantContextInterceptorOptions } from './propagation/tenant-context.interceptor';
+
+// Redis/search resource scoping
+export { TenantResourceKey } from './resources/tenant-resource-key';
+export type { TenantResourceKeyOptions } from './resources/tenant-resource-key';
+export { TenantSearch } from './resources/tenant-search';
+export type {
+  TenantSearchAdapter,
+  TenantSearchOptions,
+  TenantSearchScope,
+} from './resources/tenant-search';
 
 // Events & telemetry
 export { TenancyEventService } from './events/tenancy-event.service';

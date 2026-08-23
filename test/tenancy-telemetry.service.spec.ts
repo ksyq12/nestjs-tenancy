@@ -31,8 +31,10 @@ describe('TenancyTelemetryService', () => {
     let service: TenancyTelemetryService;
     const mockSpan = {
       setAttribute: jest.fn(),
+      addEvent: jest.fn(),
       end: jest.fn(),
     };
+    const mockCounter = { add: jest.fn() };
     const mockTracer = {
       startSpan: jest.fn().mockReturnValue(mockSpan),
     };
@@ -52,6 +54,7 @@ describe('TenancyTelemetryService', () => {
       (service as any).traceApi = mockTraceApi;
       (service as any).contextApi = mockContextApi;
       (service as any).tracer = mockTracer;
+      (service as any).missingContextCounter = mockCounter;
     });
 
     afterEach(() => jest.clearAllMocks());
@@ -59,6 +62,37 @@ describe('TenancyTelemetryService', () => {
     it('should set tenant attribute on active span', () => {
       service.setTenantAttribute('tenant-abc');
       expect(mockSpan.setAttribute).toHaveBeenCalledWith('tenant.id', 'tenant-abc');
+    });
+
+    it('should record missing-context span events and counter attributes', () => {
+      service.recordMissingContext({
+        transport: 'bull',
+        operation: 'consume',
+        resource: 'orders',
+      });
+
+      const attributes = {
+        'tenant.transport': 'bull',
+        'tenant.operation': 'consume',
+        'tenant.resource': 'orders',
+      };
+      expect(mockSpan.addEvent).toHaveBeenCalledWith(
+        'tenant.context_missing',
+        attributes,
+      );
+      expect(mockCounter.add).toHaveBeenCalledWith(1, attributes);
+    });
+
+    it('omits absent resource from metric cardinality', () => {
+      service.recordMissingContext({
+        transport: 'redis',
+        operation: 'key',
+      });
+
+      expect(mockCounter.add).toHaveBeenCalledWith(1, {
+        'tenant.transport': 'redis',
+        'tenant.operation': 'key',
+      });
     });
 
     it('should use custom spanAttributeKey', () => {

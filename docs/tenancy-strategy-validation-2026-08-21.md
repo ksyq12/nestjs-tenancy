@@ -6,6 +6,7 @@
 - P0 구현 완료: 2026-08-21 (`live DB doctor` + 실제 owner/FORCE 및 active RLS E2E)
 - P0/P1 PgBouncer matrix 완료: 2026-08-23 (transaction mode 지원 계약 + Prisma 6/7 실DB lane)
 - P1 transaction API 대표 경로 완료: 2026-08-23 (`maxWait`·failure/custom key/isolation 계약 + transparent mode deprecation)
+- P1 non-HTTP missing-context diagnostics 완료: 2026-08-23 (`ignore | warn | throw` + event/OTel metric + BullMQ/Redis E2E + search contract)
 - 목적: 다음 Codex/개발 세션에서 조사 맥락을 다시 수집하지 않고 구현 우선순위를 바로 결정할 수 있도록 근거와 결론을 보존한다.
 
 ## 1. 검증 대상
@@ -29,12 +30,12 @@
 | 안정적인 interactive transaction API | P1 대표 경로 정리 완료 + 런타임 제약 명시 | public API 기반 `tenancyTransaction()`을 canonical API로 고정하고 `maxWait`·timeout·isolation·custom key·시작/설정 실패 계약을 Prisma 6/7 실DB matrix로 검증했다. transparent mode는 deprecated compatibility 경로다. Prisma 6 `PrismaPg`의 `maxWait` 미시행은 negative contract로 명시한다. |
 | PgBouncer/pool E2E | P0/P1 구현 완료 + 지원 범위 고정 | PgBouncer 1.25.2 transaction mode를 지원 계약으로 정하고, 강제 재사용·교체·동시성·실패 cleanup을 Prisma 6/7 실DB lane에서 검증한다. session mode는 비지원 negative contract다. |
 | 패키지 간 통합 테스트 키트 | 실제 신규 기능 공백 | 현재 `./testing`은 단일 패키지용 helper뿐이다. 공개 Nestarc 저장소에서도 전체 체인의 자동화 테스트를 찾지 못했다. |
-| Redis·검색·queue 누락 진단 | 부분 구현 + 실제 진단 공백 | transport propagator와 tenant-aware cache는 존재한다. 하지만 non-HTTP 누락은 대부분 silent/pass-through이며 실 Redis/search E2E가 없다. |
+| Redis·검색·queue 누락 진단 | P1 구현 완료 + vendor 범위 명시 | 기본 호환 동작을 보존하는 공통 `ignore | warn | throw` 정책과 event/OTel 진단을 Bull/Kafka/gRPC/cache/Redis/search에 연결했다. BullMQ 6 + Redis 7.4 실환경 lane을 CI/release gate로 추가했고 search는 vendor-neutral adapter contract까지만 보증한다. |
 | 운영 DB `doctor` | P0 구현 완료 + 후속 범위 분리 | live DB catalog/role/policy와 opt-in active fail-closed probe를 구현했다. manifest batch는 후속이며, PgBouncer 재사용은 별도 matrix에서 완료했다. |
 | TypeORM·Drizzle 보류 | 합리적인 전략 결정 | 패키지는 이미 Prisma/PostgreSQL 전용이다. 현재의 문제는 ORM 확장이 아니라 로드맵의 과잉 약속과 핵심 경로의 운영 보증 부족이다. |
 | 자체 수요가 가장 강하고 선점 가능 | 공개 근거 부족 및 일부 반증 | 더 많이 다운로드되는 직접 경쟁 패키지와 Prisma 공식 RLS가 존재한다. 경쟁 우위는 RLS 자체보다 NestJS 운영 통합에서 찾아야 한다. |
 
-핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로 정리를 완료했다. 다음 우선순위는 non-HTTP missing-context 진단이다.
+핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로, non-HTTP missing-context diagnostics P1을 완료했다. 다음 우선순위는 Nestarc ecosystem compatibility harness다.
 
 ## 3. 검증 방법과 실행 결과
 
@@ -148,6 +149,35 @@ npm run test:e2e:pgbouncer # Prisma 6.19.3
 - custom setting key가 transaction-local로만 유지되고 기본 key를 건드리지 않는지, `Serializable`이 실제 PostgreSQL isolation level인지 확인했다.
 - 변경 불가능한 PostgreSQL setting을 사용해 `set_config` 실패를 주입하고 callback 미호출과 clean backend를 확인했다.
 - transparent `interactiveTransactionSupport`는 전체 Prisma 내부 metadata shape를 fail-fast 검증할 수 없으므로 deprecated compatibility 경로로 결정했다. 기존 소비자 회귀를 위해 Prisma 6/7 E2E는 유지한다.
+
+### 3.6 P1 non-HTTP missing-context diagnostics 구현 후 실행 검증
+
+공통 policy, event/telemetry, Redis/search resource contract와 BullMQ/Redis lane을 추가한 뒤 다음을 실행했다.
+
+```bash
+npm run lint
+npm test -- --runInBand
+npm run test:cov -- --runInBand
+npm run build
+npm run test:e2e
+npm run test:e2e:redis
+npm run test:e2e:pgbouncer # Prisma 7.9.1 regression
+npm pack --dry-run
+npm audit --json
+```
+
+결과:
+
+- lint/build: 통과
+- unit/integration: 46 suites, 550 tests 통과
+- coverage: 전체 statements 99.05%, branches 96.88%, functions 100%, lines 99.21%
+- direct PostgreSQL E2E: 3 suites, 31 tests 통과
+- BullMQ 6.2.0 + ioredis 6.0.0 + Redis 7.4.10: 1 suite, 3 tests 통과
+- Prisma 7.9.1 PgBouncer regression: 17 tests 통과, 버전 비대상 5 tests skip
+- package dry-run: 신규 diagnostics/resources JavaScript와 declaration을 포함한 113 files 확인
+- 실제 Redis에서 tenant A/B job이 복원된 context로 서로 다른 collision-safe key를 기록하는 것을 확인했다.
+- `throw` policy에서 producer 누락은 enqueue 전에 실패하고, raw unscoped job은 consumer resource 접근 전에 실패하는 것을 확인했다.
+- `npm audit`의 10건(2 low, 8 high)은 기존 Nest/Prisma/빌드 도구 전이 의존성에서 보고되며 신규 `bullmq`/`ioredis` 경로는 finding에 포함되지 않았다.
 
 ## 4. 상세 검증 결과
 
@@ -286,39 +316,67 @@ api-keys → tenancy → rbac → jobs/outbox/webhook
 6. tenant 누락·불일치가 fail-closed 또는 명시적 policy에 따라 처리된다.
 7. 다른 tenant의 데이터와 side effect가 관찰되지 않는다.
 
-### 4.4 Redis·검색·queue context 누락 진단: 기반은 있으나 silent semantics
+### 4.4 Redis·검색·queue context 누락 진단: P1 구현 완료
 
-이미 존재하는 기반:
+#### 공통 policy와 진단 신호
 
-- HTTP/Bull/Kafka/gRPC propagator export: [`src/index.ts`](../src/index.ts#L44)
-- Bull payload inject/extract: [`src/propagation/bull-tenant-propagator.ts`](../src/propagation/bull-tenant-propagator.ts#L42)
-- inbound Bull/Kafka/gRPC context 복원: [`src/propagation/tenant-context.interceptor.ts`](../src/propagation/tenant-context.interceptor.ts#L73)
-- tenant-aware cache key: [`src/cache/tenant-cache.interceptor.ts`](../src/cache/tenant-cache.interceptor.ts#L38)
-
-실제 공백:
-
-- outbound HTTP는 context가 없으면 `{}`를 반환한다.
-- Bull/Kafka/gRPC outbound는 context가 없으면 원 carrier를 반환한다.
-- inbound queue/RPC는 tenant를 찾지 못해도 handler를 그대로 실행한다.
-- cache는 tenant가 없으면 안전하게 caching을 끄지만 오류, event, span, counter를 만들지 않는다.
-- tenancy events에 propagation/cache/search/queue 누락 event가 없다: [`src/events/tenancy-events.ts`](../src/events/tenancy-events.ts#L11).
-- telemetry service는 generic attribute/span helper이며 propagator/cache와 연결되지 않는다: [`src/telemetry/tenancy-telemetry.service.ts`](../src/telemetry/tenancy-telemetry.service.ts#L43).
-- Redis 전용 client/key helper/실환경 E2E가 없다.
-- 검색 engine adapter와 E2E가 없다.
-- 관련 기능은 수동 opt-in이며 `TenancyModule`이 자동 등록하지 않는다: [`src/tenancy.module.ts`](../src/tenancy.module.ts#L72).
-
-HTTP는 예외적으로 비교적 fail-closed다.
-
-- middleware의 `tenant.not_found` event: [`src/middleware/tenant.middleware.ts`](../src/middleware/tenant.middleware.ts#L68)
-- guard의 tenant 누락 403: [`src/guards/tenancy.guard.ts`](../src/guards/tenancy.guard.ts#L22)
-
-권장 기능은 단순 adapter 수 증가보다 일관된 missing-context policy다.
+[`TenantContextDiagnostics`](../src/diagnostics/tenant-context-diagnostics.ts)는 non-HTTP 누락을 다음 한 계약으로 처리한다.
 
 ```text
 ignore | warn | throw
 ```
 
-이 policy를 propagator, queue consumer, cache, Redis/search helper에 공통 적용하고 event, OpenTelemetry span/event, metric counter에 resource/transport 정보를 기록하는 방향이 적절하다.
+- 기본값 `ignore`는 기존 silent/pass-through 동작을 보존하며 event/telemetry도 만들지 않는다.
+- `warn`은 구조화된 진단을 보고한 뒤 기존 동작을 계속한다.
+- `throw`는 동일한 진단을 먼저 보고하고 `TenantContextMissingError`를 던진다.
+- `TenancyModuleOptions.missingContext`로 module-level policy를 구성하며 diagnostics provider를 export한다.
+- 각 진단은 `transport`, `operation`, 선택적 stable `resource`만 담는다. tenant ID, payload, Redis key, query 본문은 기록하지 않는다.
+- reporter/hook 실패는 원래 warn/throw policy를 바꾸지 않도록 격리한다.
+
+진단 연결:
+
+- event: `tenant.context_missing`과 type-safe payload mapping
+- active OpenTelemetry span event: `tenant.context_missing`
+- metric counter: `nestarc.tenancy.missing_context`
+- OTel attributes: `tenant.transport`, `tenant.operation`, 선택적 `tenant.resource`
+- 대상: Bull/Kafka/gRPC inject/extract, RPC consumer interceptor, tenant cache, Redis/search resource helper
+
+구현 근거:
+
+- 공통 policy/reporter: [`src/diagnostics/tenant-context-diagnostics.ts`](../src/diagnostics/tenant-context-diagnostics.ts)
+- event contract: [`src/events/tenancy-events.ts`](../src/events/tenancy-events.ts)
+- OTel span event/counter: [`src/telemetry/tenancy-telemetry.service.ts`](../src/telemetry/tenancy-telemetry.service.ts)
+- module provider: [`src/tenancy.module.ts`](../src/tenancy.module.ts)
+- propagator/consumer: [`src/propagation/`](../src/propagation/)
+- cache 연결: [`src/cache/tenant-cache.interceptor.ts`](../src/cache/tenant-cache.interceptor.ts)
+
+HTTP는 이 policy의 대상이 아니다. 기존 middleware의 `tenant.not_found` event와 guard의 tenant 누락 403 계약을 유지한다.
+
+#### Redis/search resource contract
+
+- [`TenantResourceKey`](../src/resources/tenant-resource-key.ts)는 tenant ID 길이 prefix를 포함하는 collision-safe Redis/search identifier를 만든다.
+- missing context에서는 adapter/resource를 호출할 수 있도록 unscoped key를 만들지 않고 `null`을 반환하며, `throw` policy이면 그 전에 실패한다.
+- [`TenantSearch`](../src/resources/tenant-search.ts)는 `{ tenantId, index }` scope를 vendor adapter에 명시적으로 넘긴다.
+- missing context에서는 search adapter를 절대 호출하지 않는다. `ignore/warn`은 `null`, `throw`는 예외가 계약이다.
+- Elasticsearch/OpenSearch/Typesense 등 특정 vendor client와 index filter 구현은 이 P1의 보증 범위가 아니다.
+
+#### 실제 BullMQ/Redis E2E와 gate
+
+- Compose는 Redis 7.4.10 Alpine image를 tag+digest로 고정한다.
+- E2E dev runtime은 BullMQ 6.2.0과 ioredis 6.0.0이며 package runtime dependency에는 추가하지 않았다.
+- [`test/e2e/redis/bullmq-redis.e2e-spec.ts`](../test/e2e/redis/bullmq-redis.e2e-spec.ts)는 실제 queue/worker/Redis를 사용한다.
+- tenant A/B job의 context 복원과 실제 Redis key/value 격리를 검증한다.
+- missing producer context가 enqueue 전에 실패하는지 검증한다.
+- raw unscoped job이 processor의 Redis 접근 전에 실패하고 tenant key를 쓰지 않는지 검증한다.
+- CI와 release publish gate에 독립 `redis-e2e` job을 추가했다.
+
+잔여 제약:
+
+- propagator와 interceptor를 수동 생성할 때는 module에서 export한 diagnostics instance를 명시적으로 전달해야 한다.
+- transport 자동 감지는 tenant key 자체가 없는 Bull payload를 Bull로 판별할 수 없으므로 consumer 진단에는 명시적 `transport: 'bull'`이 권장된다.
+- cache는 Nest DI에서 module-level diagnostics를 자동으로 받을 수 있다. 명시적으로 shared 처리한 route는 missing-context 진단 대상이 아니다.
+- OTel API/SDK 또는 meter provider가 없으면 span event/counter는 정상적으로 no-op이다.
+- 실제 vendor search engine E2E와 Redis client abstraction은 의도적으로 추가하지 않았다. 현재 보증은 resource scoping, adapter 미호출, 누락 진단 계약이다.
 
 ### 4.5 Live DB `doctor`: P0 기능 공백 해소
 
@@ -498,12 +556,12 @@ TypeORM·Drizzle·MikroORM은 실제 구현이 아니라 roadmap/research에만 
 4. ✅ `set_config` 실패·transaction 시작 실패·custom key·isolation level 실DB E2E를 추가했다.
 5. ✅ transparent internal mode를 deprecated compatibility 경로로 결정하고 exact-version 회귀 E2E를 유지했다.
 
-### P1 — non-HTTP missing-context diagnostics
+### P1 — non-HTTP missing-context diagnostics ✅ 완료 (2026-08-23)
 
-1. 공통 `ignore | warn | throw` policy를 설계한다.
-2. event, OpenTelemetry, metric을 transport/resource별로 연결한다.
-3. 실제 BullMQ/Redis E2E를 만든다.
-4. search는 특정 vendor 구현보다 adapter contract와 누락 진단부터 정의한다.
+1. ✅ 기존 기본 동작을 보존하는 공통 `ignore | warn | throw` policy를 구현했다.
+2. ✅ `tenant.context_missing` event, active OTel span event, metric counter를 transport/resource별로 연결했다.
+3. ✅ 실제 BullMQ 6/Redis 7.4 E2E와 CI/release gate를 만들었다.
+4. ✅ vendor-neutral search adapter contract와 adapter 미호출 누락 계약을 정의했다.
 
 ### P2 — Nestarc ecosystem compatibility harness
 
@@ -525,11 +583,11 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 3. 기준 커밋 `2fe5288` 이후 transaction, CLI, E2E, CI 변경 여부를 diff한다.
 4. 구현 요청이 아니라 재검증 요청이면 전체 unit/build/lint/direct E2E와 Prisma 6/7 PgBouncer E2E를 다시 실행한다.
 5. 시장 판단이 필요하면 npm 수치와 Prisma/Yates/UseBetter 상태를 다시 조회한다.
-6. 다음 구현 작업은 non-HTTP missing-context diagnostics에서 독립 작업 단위를 선택한다.
+6. 다음 구현 작업은 Nestarc ecosystem compatibility harness에서 독립 fixture 범위를 선택한다.
 
 추천 첫 구현 작업:
 
-> propagator/queue/cache에 공통 `ignore | warn | throw` missing-context policy를 설계하고, 기존 기본 동작을 보존하는 opt-in 진단 경로부터 구현한다.
+> 별도 fixture application에서 API key → tenancy context → RBAC → DB → job/outbox/webhook의 최소 cross-package contract를 정의하고, 실제 package tarball 설치부터 시작한다.
 
 ## 8. 세션 재개용 짧은 프롬프트
 
@@ -537,7 +595,7 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 
 ```text
 docs/tenancy-strategy-validation-2026-08-21.md를 읽고 현재 HEAD와 차이를 확인한 뒤,
-완료된 live DB doctor/RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로의 회귀를 보존하면서
-non-HTTP missing-context diagnostics의 다음 미완료 작업을 구현해 주세요.
+완료된 live DB doctor/RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로,
+non-HTTP missing-context diagnostics P1의 회귀를 보존하면서 ecosystem compatibility harness의 다음 작업을 구현해 주세요.
 시장 수치는 스냅샷이므로 구현 판단에 필요할 때만 최신화하세요.
 ```

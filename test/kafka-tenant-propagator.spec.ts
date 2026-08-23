@@ -1,5 +1,6 @@
 import { TenancyContext } from '../src/services/tenancy-context';
 import { KafkaTenantPropagator } from '../src/propagation/kafka-tenant-propagator';
+import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 describe('KafkaTenantPropagator', () => {
   let context: TenancyContext;
@@ -51,6 +52,17 @@ describe('KafkaTenantPropagator', () => {
       expect(propagator.inject(message)).toBe(message);
     });
 
+    it('should apply throw policy when producer context is missing', () => {
+      const propagator = new KafkaTenantPropagator(context, {
+        resource: 'orders.created',
+        diagnostics: new TenantContextDiagnostics({ policy: 'throw' }),
+      });
+
+      expect(() => propagator.inject({ value: 'payload' })).toThrow(
+        'Tenant context is missing during kafka.inject for resource "orders.created"',
+      );
+    });
+
     it('should not mutate original message', (done) => {
       const propagator = new KafkaTenantPropagator(context);
       const original = { value: 'payload', headers: { existing: 'header' } };
@@ -87,6 +99,18 @@ describe('KafkaTenantPropagator', () => {
     it('should return null when header is missing', () => {
       const propagator = new KafkaTenantPropagator(context);
       expect(propagator.extract({ headers: {} })).toBeNull();
+    });
+
+    it('should diagnose missing header context on extract', () => {
+      const onMissing = jest.fn();
+      const propagator = new KafkaTenantPropagator(context, {
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      });
+
+      expect(propagator.extract({ headers: {} })).toBeNull();
+      expect(onMissing).toHaveBeenCalledWith({
+        transport: 'kafka', operation: 'extract',
+      });
     });
 
     it('should return null when headers object is undefined', () => {

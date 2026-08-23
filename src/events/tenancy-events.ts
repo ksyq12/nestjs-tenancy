@@ -1,4 +1,5 @@
 import { TenancyRequest } from '../interfaces/tenancy-request.interface';
+import type { MissingTenantContextDiagnostic } from '../diagnostics/tenant-context-diagnostics';
 
 export interface TenancyEventRequestSummary {
   method?: string;
@@ -15,6 +16,7 @@ export const TenancyEvents = {
   VALIDATION_FAILED: 'tenant.validation_failed',
   CONTEXT_BYPASSED: 'tenant.context_bypassed',
   CROSS_CHECK_FAILED: 'tenant.cross_check_failed',
+  CONTEXT_MISSING: 'tenant.context_missing',
 } as const;
 
 interface TenancyEventRequestPayload {
@@ -93,4 +95,5 @@ export interface TenancyEventMap {
   [TenancyEvents.VALIDATION_FAILED]: TenantValidationFailedEvent;
   [TenancyEvents.CONTEXT_BYPASSED]: TenantContextBypassedEvent;
   [TenancyEvents.CROSS_CHECK_FAILED]: TenantCrossCheckFailedEvent;
+  [TenancyEvents.CONTEXT_MISSING]: MissingTenantContextDiagnostic;
 }

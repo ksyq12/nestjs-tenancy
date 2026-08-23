@@ -24,7 +24,10 @@ import {
   TenancyTelemetryService,
   tenancyTransaction,
   TenantContextInterceptor,
+  TenantContextDiagnostics,
   TenantContextMissingError,
+  TenantResourceKey,
+  TenantSearch,
   TenancyService,
 } from '../src';
 import type {
@@ -52,6 +55,9 @@ import type {
   TenantContextBypassedEvent,
   TenantContextCarrier,
   TenantContextInterceptorOptions,
+  TenantContextDiagnosticsOptions,
+  MissingTenantContextDiagnostic,
+  MissingTenantContextPolicy,
   TenantCrossCheckFailedEvent,
   TenantExtractionFailedEvent,
   TenantExtractor,
@@ -59,6 +65,10 @@ import type {
   TenantPropagator,
   TenantResolvedEvent,
   TenantValidationFailedEvent,
+  TenantResourceKeyOptions,
+  TenantSearchAdapter,
+  TenantSearchOptions,
+  TenantSearchScope,
 } from '../src';
 import {
   expectTenantIsolation,
@@ -105,6 +115,9 @@ describe('public API barrels', () => {
       KafkaTenantPropagator,
       GrpcTenantPropagator,
       TenantContextInterceptor,
+      TenantContextDiagnostics,
+      TenantResourceKey,
+      TenantSearch,
       TenancyEventService,
       TenancyTelemetryService,
       TenancyEvents,
@@ -133,11 +146,15 @@ describe('public API barrels', () => {
         KafkaTenantPropagator: expect.any(Function),
         GrpcTenantPropagator: expect.any(Function),
         TenantContextInterceptor: expect.any(Function),
+        TenantContextDiagnostics: expect.any(Function),
+        TenantResourceKey: expect.any(Function),
+        TenantSearch: expect.any(Function),
         TenancyEventService: expect.any(Function),
         TenancyTelemetryService: expect.any(Function),
         TenancyEvents: expect.objectContaining({
           RESOLVED: 'tenant.resolved',
           NOT_FOUND: 'tenant.not_found',
+          CONTEXT_MISSING: 'tenant.context_missing',
         }),
       }),
     );
@@ -227,6 +244,7 @@ describe('public API barrels', () => {
         required: false,
       },
       telemetry: telemetryOptions,
+      missingContext: { policy: 'warn' },
     };
     const optionsFactory: TenancyModuleOptionsFactory = {
       createTenancyOptions: () => moduleOptions,
@@ -336,6 +354,11 @@ describe('public API barrels', () => {
       [TenancyEvents.VALIDATION_FAILED]: validationFailedEvent,
       [TenancyEvents.CONTEXT_BYPASSED]: bypassedEvent,
       [TenancyEvents.CROSS_CHECK_FAILED]: crossCheckFailedEvent,
+      [TenancyEvents.CONTEXT_MISSING]: {
+        transport: 'redis',
+        operation: 'key',
+        resource: 'cache',
+      },
     };
 
     const request: TenancyRequest = {
@@ -356,6 +379,27 @@ describe('public API barrels', () => {
     const interceptorOptions: TenantContextInterceptorOptions = {
       transport: 'kafka',
       kafkaHeaderName: 'X-Tenant-Id',
+    };
+    const missingPolicy: MissingTenantContextPolicy = 'warn';
+    const missingOptions: TenantContextDiagnosticsOptions = {
+      policy: missingPolicy,
+    };
+    const missingDiagnostic: MissingTenantContextDiagnostic = {
+      transport: 'redis',
+      operation: 'key',
+      resource: 'cache',
+    };
+    const resourceKeyOptions: TenantResourceKeyOptions = {
+      transport: 'redis',
+      resource: 'cache',
+    };
+    const searchScope: TenantSearchScope = {
+      tenantId: 'tenant-a',
+      index: 'products',
+    };
+    const searchOptions: TenantSearchOptions = { index: 'products' };
+    const searchAdapter: TenantSearchAdapter<string, string[]> = {
+      search: async () => ['result'],
     };
 
     const testingModuleOptions: TestTenancyModuleOptions = {
@@ -388,6 +432,12 @@ describe('public API barrels', () => {
       request,
       response.status?.(204),
       interceptorOptions,
+      missingOptions,
+      missingDiagnostic,
+      resourceKeyOptions,
+      searchScope,
+      searchOptions,
+      searchAdapter,
       testingModuleOptions,
       isolationOptions,
     ]).toEqual([
@@ -413,6 +463,12 @@ describe('public API barrels', () => {
       request,
       response,
       interceptorOptions,
+      missingOptions,
+      missingDiagnostic,
+      resourceKeyOptions,
+      searchScope,
+      searchOptions,
+      searchAdapter,
       testingModuleOptions,
       isolationOptions,
     ]);

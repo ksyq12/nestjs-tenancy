@@ -22,6 +22,7 @@ import { HeaderTenantExtractor } from '../src/extractors/header.extractor';
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenancyModule } from '../src/tenancy.module';
 import { SHARED_TENANT_CACHE_KEY } from '../src/tenancy.constants';
+import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 type BaseCacheKey =
   | Promise<string | undefined | null>
@@ -174,6 +175,23 @@ describe('TenantCacheInterceptor', () => {
     await expect(interceptor.track(execCtx)).resolves.toBeUndefined();
   });
 
+  it('should diagnose a missing tenant before disabling cache', async () => {
+    const onMissing = jest.fn();
+    const interceptor = new TestTenantCacheInterceptor(
+      reflector,
+      'GET:/products',
+      {
+        resource: 'response-cache',
+        diagnostics: new TenantContextDiagnostics({ policy: 'warn', onMissing }),
+      },
+    );
+
+    await expect(interceptor.track(createExecutionContext())).resolves.toBeUndefined();
+    expect(onMissing).toHaveBeenCalledWith({
+      transport: 'cache', operation: 'cache', resource: 'response-cache',
+    });
+  });
+
   it('should use shared prefix for handler-level shared cache metadata', async () => {
     function handler() {}
     Reflect.defineMetadata(SHARED_TENANT_CACHE_KEY, true, handler);
@@ -297,6 +315,37 @@ describe('TenantCacheInterceptor', () => {
       );
 
       expect(result).toBe('org|8:tenant-a|products');
+    } finally {
+      await moduleRef.close();
+    }
+  });
+
+  it('should use the module-level missing-context policy through dependency injection', async () => {
+    class ProductsController {
+      @CacheKey('products')
+      findAll() {}
+    }
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        CacheModule.register(),
+        TenancyModule.forRoot({
+          tenantExtractor: 'x-tenant-id',
+          missingContext: { policy: 'throw' },
+        }),
+      ],
+      providers: [TenantCacheInterceptor],
+    }).compile();
+
+    try {
+      const interceptor = moduleRef.get(TenantCacheInterceptor);
+      const execCtx = createExecutionContext(
+        ProductsController.prototype.findAll,
+        ProductsController,
+      );
+      await expect(
+        (interceptor as unknown as TrackByCapable).trackBy(execCtx),
+      ).rejects.toThrow('Tenant context is missing during cache.cache');
     } finally {
       await moduleRef.close();
     }
