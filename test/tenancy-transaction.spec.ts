@@ -22,20 +22,33 @@ describe('tenancyTransaction', () => {
 
   it('should call $transaction with set_config and callback', async () => {
     const { mockPrisma, mockTransaction } = buildMockPrisma();
+    const callOrder: string[] = [];
+    const mockExecuteRaw = jest.fn().mockImplementation(async () => {
+      callOrder.push('set_config');
+      return 1;
+    });
 
     mockTransaction.mockImplementation(async (cb: any) => {
-      const mockTx = { $executeRaw: jest.fn().mockResolvedValue(1) };
-      return cb(mockTx);
+      return cb({ $executeRaw: mockExecuteRaw });
     });
 
     await new Promise<void>((resolve, reject) => {
       context.run('tenant-123', async () => {
         try {
           const result = await tenancyTransaction(
-            mockPrisma, service, async () => 'callback-result',
+            mockPrisma, service, async () => {
+              callOrder.push('callback');
+              return 'callback-result';
+            },
           );
           expect(result).toBe('callback-result');
           expect(mockTransaction).toHaveBeenCalledTimes(1);
+          expect(mockExecuteRaw).toHaveBeenCalledWith(
+            ['SELECT set_config(', ', ', ', TRUE)'],
+            'app.current_tenant',
+            'tenant-123',
+          );
+          expect(callOrder).toEqual(['set_config', 'callback']);
           resolve();
         } catch (e) { reject(e); }
       });
@@ -61,11 +74,14 @@ describe('tenancyTransaction', () => {
       context.run('tenant-123', async () => {
         try {
           await tenancyTransaction(
-            mockPrisma, service, async () => 'ok', { timeout: 5000 },
+            mockPrisma,
+            service,
+            async () => 'ok',
+            { maxWait: 750, timeout: 5000 },
           );
           expect(mockTransaction).toHaveBeenCalledWith(
             expect.any(Function),
-            { timeout: 5000 },
+            { maxWait: 750, timeout: 5000 },
           );
           resolve();
         } catch (e) { reject(e); }
@@ -79,7 +95,11 @@ describe('tenancyTransaction', () => {
     mockTransaction.mockImplementation(async (cb: any) => {
       const mockTx = { $executeRaw: jest.fn().mockResolvedValue(1) };
       const result = await cb(mockTx);
-      expect(mockTx.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(mockTx.$executeRaw).toHaveBeenCalledWith(
+        ['SELECT set_config(', ', ', ', TRUE)'],
+        'custom.tenant',
+        'tenant-123',
+      );
       return result;
     });
 
@@ -162,6 +182,47 @@ describe('tenancyTransaction', () => {
               throw new Error('callback failed');
             }),
           ).rejects.toThrow('callback failed');
+          resolve();
+        } catch (e) { reject(e); }
+      });
+    });
+  });
+
+  it('should not call the callback when set_config fails', async () => {
+    const { mockPrisma, mockTransaction } = buildMockPrisma();
+    const settingError = new Error('set_config failed');
+    const callback = jest.fn();
+
+    mockTransaction.mockImplementation(async (cb: any) =>
+      cb({ $executeRaw: jest.fn().mockRejectedValue(settingError) }),
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      context.run('tenant-123', async () => {
+        try {
+          await expect(
+            tenancyTransaction(mockPrisma, service, callback),
+          ).rejects.toBe(settingError);
+          expect(callback).not.toHaveBeenCalled();
+          resolve();
+        } catch (e) { reject(e); }
+      });
+    });
+  });
+
+  it('should propagate transaction start failures without calling the callback', async () => {
+    const { mockPrisma, mockTransaction } = buildMockPrisma();
+    const startError = new Error('transaction start failed');
+    const callback = jest.fn();
+    mockTransaction.mockRejectedValue(startError);
+
+    await new Promise<void>((resolve, reject) => {
+      context.run('tenant-123', async () => {
+        try {
+          await expect(
+            tenancyTransaction(mockPrisma, service, callback, { maxWait: 25 }),
+          ).rejects.toBe(startError);
+          expect(callback).not.toHaveBeenCalled();
           resolve();
         } catch (e) { reject(e); }
       });

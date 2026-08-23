@@ -5,6 +5,7 @@
 - 검증 패키지 버전: `0.14.0`
 - P0 구현 완료: 2026-08-21 (`live DB doctor` + 실제 owner/FORCE 및 active RLS E2E)
 - P0/P1 PgBouncer matrix 완료: 2026-08-23 (transaction mode 지원 계약 + Prisma 6/7 실DB lane)
+- P1 transaction API 대표 경로 완료: 2026-08-23 (`maxWait`·failure/custom key/isolation 계약 + transparent mode deprecation)
 - 목적: 다음 Codex/개발 세션에서 조사 맥락을 다시 수집하지 않고 구현 우선순위를 바로 결정할 수 있도록 근거와 결론을 보존한다.
 
 ## 1. 검증 대상
@@ -25,7 +26,7 @@
 
 | 제안 | 최종 판정 | 정확한 해석 |
 | --- | --- | --- |
-| 안정적인 interactive transaction API | 이미 구현됨 + 잔여 호환성 위험 | public API 기반 `tenancyTransaction()`과 Prisma 6/7 PgBouncer 실DB matrix가 존재한다. 잔여 위험은 transparent mode의 Prisma 내부 API 의존성과 `maxWait`·custom key·isolation·transaction 시작 실패 계약이다. |
+| 안정적인 interactive transaction API | P1 대표 경로 정리 완료 + 런타임 제약 명시 | public API 기반 `tenancyTransaction()`을 canonical API로 고정하고 `maxWait`·timeout·isolation·custom key·시작/설정 실패 계약을 Prisma 6/7 실DB matrix로 검증했다. transparent mode는 deprecated compatibility 경로다. Prisma 6 `PrismaPg`의 `maxWait` 미시행은 negative contract로 명시한다. |
 | PgBouncer/pool E2E | P0/P1 구현 완료 + 지원 범위 고정 | PgBouncer 1.25.2 transaction mode를 지원 계약으로 정하고, 강제 재사용·교체·동시성·실패 cleanup을 Prisma 6/7 실DB lane에서 검증한다. session mode는 비지원 negative contract다. |
 | 패키지 간 통합 테스트 키트 | 실제 신규 기능 공백 | 현재 `./testing`은 단일 패키지용 helper뿐이다. 공개 Nestarc 저장소에서도 전체 체인의 자동화 테스트를 찾지 못했다. |
 | Redis·검색·queue 누락 진단 | 부분 구현 + 실제 진단 공백 | transport propagator와 tenant-aware cache는 존재한다. 하지만 non-HTTP 누락은 대부분 silent/pass-through이며 실 Redis/search E2E가 없다. |
@@ -33,7 +34,7 @@
 | TypeORM·Drizzle 보류 | 합리적인 전략 결정 | 패키지는 이미 Prisma/PostgreSQL 전용이다. 현재의 문제는 ORM 확장이 아니라 로드맵의 과잉 약속과 핵심 경로의 운영 보증 부족이다. |
 | 자체 수요가 가장 강하고 선점 가능 | 공개 근거 부족 및 일부 반증 | 더 많이 다운로드되는 직접 경쟁 패키지와 Prisma 공식 RLS가 존재한다. 경쟁 우위는 RLS 자체보다 NestJS 운영 통합에서 찾아야 한다. |
 
-핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0에 이어 PgBouncer P0/P1 matrix까지 완료했다. 남은 우선순위는 public transaction API의 세부 option·failure contract와 non-HTTP 진단이다.
+핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로 정리를 완료했다. 다음 우선순위는 non-HTTP missing-context 진단이다.
 
 ## 3. 검증 방법과 실행 결과
 
@@ -121,9 +122,36 @@ Prisma 6 lane은 CI와 동일하게 `prisma`, `@prisma/client`, `@prisma/adapter
 - helper, 기본 batch extension, transparent interactive mode를 독립 시나리오로 기록했다. named prepared statement positive assertion은 이를 지원하는 Prisma 7 adapter에서 수행하며, Prisma 6 adapter는 callback 지원 여부에 따라 조건부로 관찰한다.
 - CI와 release가 Prisma 6/7 PgBouncer job을 통과해야 하며, release publish는 이 job을 필수 선행 조건으로 둔다.
 
+### 3.5 P1 transaction API 대표 경로 정리 후 실행 검증
+
+public helper option/failure contract와 transparent mode 방향을 정리한 뒤 다음을 실행했다.
+
+```bash
+npm run lint
+npm test -- --runInBand
+npm run build
+npm run test:e2e
+npm run test:e2e:pgbouncer # Prisma 7.9.1
+npm install prisma@6.19.3 @prisma/client@6.19.3 @prisma/adapter-pg@6.19.3 --no-save
+npm run test:e2e:pgbouncer # Prisma 6.19.3
+```
+
+결과:
+
+- lint/build: 통과
+- unit: 43 suites, 525 tests 통과
+- direct PostgreSQL E2E: 3 suites, 31 tests 통과
+- PgBouncer + Prisma 7.9.1: 17 tests 통과, 버전 비대상 5 tests skip
+- PgBouncer + Prisma 6.19.3: 21 tests 통과, 버전 비대상 1 test skip
+- helper가 `maxWait`를 Prisma `$transaction()`에 전달하며, Prisma 7 `PrismaPg`와 Prisma 6 native engine에서 connection-pool contention에 의한 transaction 시작 timeout 및 callback 미호출을 실DB로 확인했다.
+- Prisma 6.19.3 `PrismaPg`는 `maxWait`를 받아도 adapter connection-pool contention에서 시행하지 않고 대기 후 callback을 실행한다. 이를 지원한다고 과장하지 않고 명시적 negative contract로 고정했다.
+- custom setting key가 transaction-local로만 유지되고 기본 key를 건드리지 않는지, `Serializable`이 실제 PostgreSQL isolation level인지 확인했다.
+- 변경 불가능한 PostgreSQL setting을 사용해 `set_config` 실패를 주입하고 callback 미호출과 clean backend를 확인했다.
+- transparent `interactiveTransactionSupport`는 전체 Prisma 내부 metadata shape를 fail-fast 검증할 수 없으므로 deprecated compatibility 경로로 결정했다. 기존 소비자 회귀를 위해 Prisma 6/7 E2E는 유지한다.
+
 ## 4. 상세 검증 결과
 
-### 4.1 Interactive transaction: 새 API가 아니라 기존 API의 신뢰성 강화
+### 4.1 Interactive transaction: P1 대표 경로 정리 완료
 
 #### 이미 존재하는 안전한 대표 경로
 
@@ -144,7 +172,7 @@ Prisma 6 lane은 CI와 동일하게 `prisma`, `@prisma/client`, `@prisma/adapter
 
 따라서 “Prisma 내부 API에 덜 의존하는 transaction API가 없다”는 표현은 부정확하다.
 
-#### 실제 잔여 위험: transparent mode
+#### transparent mode 결정: deprecated compatibility 경로
 
 `interactiveTransactionSupport: true`인 선택적 transparent mode는 다음 Prisma 내부 구조를 사용한다.
 
@@ -153,26 +181,27 @@ Prisma 6 lane은 CI와 동일하게 `prisma`, `@prisma/client`, `@prisma/adapter
 - runtime 감지 및 내부 client 생성: 같은 파일 171행 이후
 - startup 검증: 같은 파일 114행 이후
 
-startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__internalParams` 또는 `transaction.kind`의 shape를 변경하면 startup 검사를 통과한 뒤 일반 batch transaction 경로로 조용히 fallback할 수 있다. 기존 repository audit도 동일 위험을 기록한다.
+startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__internalParams` 또는 `transaction.kind`의 shape를 변경하면 startup 검사를 통과한 뒤 일반 batch transaction 경로로 조용히 fallback할 수 있다. query가 interactive transaction 내부인지 공개 API로 판별할 수 없어 전체 shape의 안전한 사전 fail-fast는 구현할 수 없다. 따라서 이 옵션에 TypeScript `@deprecated`를 표시하고 신규 사용은 `tenancyTransaction()`으로 고정했다. 기존 소비자를 즉시 깨지 않도록 구현과 exact-version 회귀 E2E는 유지한다.
 
 - 기존 감사 기록: [`docs/code-review-2026-04-07.md`](./code-review-2026-04-07.md#L85)
 - metadata 부재 시 fallback을 기대하는 테스트: [`test/prisma-tenancy.extension.spec.ts`](../test/prisma-tenancy.extension.spec.ts#L772)
 
-이는 Prisma 7.9.1에서 현재 재현되는 장애가 아니라, 내부 contract 변경 시 fail-fast하지 못하는 조건부 호환성 결함이다.
+이는 현재 Prisma 6.19.3/7.9.1에서 재현되는 장애가 아니라, 내부 contract 변경 시 fail-fast하지 못하는 조건부 호환성 결함이다.
 
-#### 남은 보증 공백
+#### 완료된 public helper 계약과 잔여 런타임 제약
 
-- Prisma 6/7 모두 PgBouncer 실DB lane을 수행한다. 다만 direct PostgreSQL 전용 E2E는 기본 Prisma 7 개발 버전 한 lane이다.
-- helper option에는 Prisma interactive transaction의 `maxWait`가 없다.
-- callback/DB error rollback과 timeout cleanup은 PgBouncer 실DB에서 검증한다. `set_config` 실패와 `$transaction` 시작 실패의 실DB 주입 검증은 남아 있다.
-- custom setting key와 isolation level의 실DB 의미를 검증하지 않는다.
-- 일부 unit test는 이름과 달리 실제 setting 값과 callback 이전 실행 순서를 assert하지 않는다.
+- helper option은 Prisma의 public interactive transaction option인 `maxWait`, `timeout`, `isolationLevel`을 구조적으로 전달하고 별도 `dbSettingKey`를 지원한다.
+- unit test는 실제 setting key/tenant 값 바인딩, callback 이전 `set_config` 실행 순서, 시작/설정 실패 시 callback 미호출을 검증한다.
+- Prisma 6/7 `PrismaPg` 실DB lane에서 custom key의 transaction-local 의미, 실제 `Serializable`, `set_config` 실패, callback/DB error/timeout cleanup을 검증한다.
+- transaction 시작 실패는 Prisma 7 `PrismaPg`와 Prisma 6 native engine에서 `maxWait`로 검증한다.
+- Prisma 6.19.3 `PrismaPg`는 adapter pool contention에서 `maxWait`를 시행하지 않는다. helper가 안전하게 이를 보완할 수 없으며, caller에게 먼저 timeout을 반환하면 queued transaction과 callback이 나중에 실행될 수 있으므로 자체 `Promise.race` timeout은 구현하지 않는다.
+- direct PostgreSQL 전용 E2E는 기본 Prisma 7 개발 버전 한 lane이며, managed pooler/다른 adapter의 option 시행 여부는 이 matrix의 보증 범위가 아니다.
 
-#### 권장 결정
+#### 결정 결과
 
-- `tenancyTransaction()`을 canonical/권장 경로로 명시한다.
-- public helper의 Prisma 버전별 실DB 계약과 failure semantics를 강화한다.
-- transparent mode는 전체 내부 contract를 fail-fast로 검사하거나 장기적으로 experimental/deprecated 경로로 낮춘다.
+- `tenancyTransaction()`을 canonical/권장 경로로 유지한다.
+- Prisma 6에서 transaction 시작 대기 상한이 필수이면 native engine을 사용하거나 helper 호출 전 admission control을 둔다.
+- transparent mode는 deprecated compatibility 경로로 유지하고 신규 코드는 사용하지 않는다.
 
 ### 4.2 PgBouncer/connection pool E2E: P0/P1 지원 계약 구현 완료
 
@@ -461,13 +490,13 @@ TypeORM·Drizzle·MikroORM은 실제 구현이 아니라 roadmap/research에만 
 4. ✅ commit/rollback/DB error/timeout/동시성, pool size 2 교체·재사용을 검증했다.
 5. ✅ Prisma 6/7 실DB lane을 CI와 release gate에 추가했다.
 
-### P1 — transaction API 대표 경로 정리
+### P1 — transaction API 대표 경로 정리 ✅ 완료 (2026-08-23)
 
 1. ✅ `tenancyTransaction()`을 canonical/권장 API로 문서화하고 Prisma 6/7 PgBouncer helper lane을 추가했다.
-2. `maxWait` 및 필요한 public transaction option 지원 여부를 결정한다.
+2. ✅ `maxWait`를 public option에 추가하고 Prisma 7 adapter/Prisma 6 native positive contract와 Prisma 6 adapter negative contract를 정의했다.
 3. ✅ callback error·DB error rollback과 timeout cleanup 실DB E2E를 추가했다.
-4. `set_config` 실패·transaction 시작 실패·custom key·isolation level 실DB E2E를 추가한다.
-5. transparent internal mode의 fail-fast contract 또는 deprecation 방향을 결정한다.
+4. ✅ `set_config` 실패·transaction 시작 실패·custom key·isolation level 실DB E2E를 추가했다.
+5. ✅ transparent internal mode를 deprecated compatibility 경로로 결정하고 exact-version 회귀 E2E를 유지했다.
 
 ### P1 — non-HTTP missing-context diagnostics
 
@@ -496,11 +525,11 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 3. 기준 커밋 `2fe5288` 이후 transaction, CLI, E2E, CI 변경 여부를 diff한다.
 4. 구현 요청이 아니라 재검증 요청이면 전체 unit/build/lint/direct E2E와 Prisma 6/7 PgBouncer E2E를 다시 실행한다.
 5. 시장 판단이 필요하면 npm 수치와 Prisma/Yates/UseBetter 상태를 다시 조회한다.
-6. 다음 구현 작업은 transaction API 신뢰성 강화 또는 non-HTTP missing-context diagnostics에서 독립 작업 단위를 선택한다.
+6. 다음 구현 작업은 non-HTTP missing-context diagnostics에서 독립 작업 단위를 선택한다.
 
 추천 첫 구현 작업:
 
-> `tenancyTransaction()`의 `maxWait` 지원 여부를 결정하고, custom setting key·isolation level·transaction 시작 실패를 Prisma 6/7 실DB E2E로 검증한다.
+> propagator/queue/cache에 공통 `ignore | warn | throw` missing-context policy를 설계하고, 기존 기본 동작을 보존하는 opt-in 진단 경로부터 구현한다.
 
 ## 8. 세션 재개용 짧은 프롬프트
 
@@ -508,7 +537,7 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 
 ```text
 docs/tenancy-strategy-validation-2026-08-21.md를 읽고 현재 HEAD와 차이를 확인한 뒤,
-완료된 live DB doctor/RLS P0와 PgBouncer P0/P1 matrix의 회귀를 보존하면서
-transaction API 신뢰성 또는 non-HTTP missing-context diagnostics의 다음 미완료 작업을 구현해 주세요.
+완료된 live DB doctor/RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로의 회귀를 보존하면서
+non-HTTP missing-context diagnostics의 다음 미완료 작업을 구현해 주세요.
 시장 수치는 스냅샷이므로 구현 판단에 필요할 때만 최신화하세요.
 ```

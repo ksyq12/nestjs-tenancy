@@ -50,11 +50,14 @@ export interface PrismaTenancyExtensionOptions {
    * on the transaction's connection directly.
    *
    * Relies on Prisma internal APIs (`__internalParams`, `_createItxClient`).
-   * Compatibility is validated at extension creation time — an error is thrown
-   * immediately if the current Prisma version does not support this feature.
+   * Extension creation verifies `_createItxClient`, but Prisma does not expose a
+   * public way to validate the full `__internalParams.transaction` shape.
+   * A Prisma internal change can therefore bypass transparent detection.
    *
    * For an alternative that uses only public Prisma APIs, see `tenancyTransaction()`.
    *
+   * @deprecated Use `tenancyTransaction()` for interactive transactions. This
+   * compatibility-sensitive mode is retained only for existing consumers.
    * @default false
    */
   interactiveTransactionSupport?: boolean;
@@ -82,9 +85,9 @@ export interface PrismaTenancyExtensionOptions {
  *
  * **Interactive transactions:**
  * By default, the batch `$transaction([set_config, query])` does not propagate into
- * interactive transactions (`$transaction(async (tx) => ...)`). Two solutions:
- * 1. Enable `interactiveTransactionSupport: true` for transparent handling (uses Prisma internals).
- * 2. Use the standalone `tenancyTransaction()` helper (public APIs only).
+ * interactive transactions (`$transaction(async (tx) => ...)`). Use the standalone
+ * `tenancyTransaction()` helper (public APIs only). The deprecated
+ * `interactiveTransactionSupport: true` mode remains for existing consumers.
  *
  * Usage:
  * ```typescript

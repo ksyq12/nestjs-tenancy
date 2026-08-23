@@ -47,6 +47,8 @@ const GENERATED_V6_NATIVE_CLIENT = path.join(
 const PRISMA_VERSION = String(require('@prisma/client/package.json').version);
 const PRISMA_MAJOR = Number.parseInt(PRISMA_VERSION.split('.')[0], 10);
 const describePrisma6Native = PRISMA_MAJOR === 6 ? describe : describe.skip;
+const itPrisma7Adapter = PRISMA_MAJOR >= 7 ? it : it.skip;
+const itPrisma6Adapter = PRISMA_MAJOR === 6 ? it : it.skip;
 
 const PROBE_SQL = `
   SELECT pg_backend_pid()::int AS backend_pid,
@@ -175,6 +177,53 @@ function databaseNameFromUrl(connectionString: string): string {
   }
 
   return databaseName;
+}
+
+async function expectMaxWaitStartFailure(
+  prisma: any,
+  context: TenancyContext,
+  service: TenancyService,
+): Promise<void> {
+  const callback = jest.fn(async () => 'unexpected');
+  let releaseHolder!: () => void;
+  let markHolderStarted!: () => void;
+  const holderStarted = new Promise<void>((resolve) => {
+    markHolderStarted = resolve;
+  });
+  const holderRelease = new Promise<void>((resolve) => {
+    releaseHolder = resolve;
+  });
+
+  await prisma.$connect();
+  try {
+    const holder = context.run(TENANT_A, () =>
+      tenancyTransaction(prisma, service, async (tx: any) => {
+        await queryProbe(tx);
+        markHolderStarted();
+        await holderRelease;
+      }),
+    );
+    await holderStarted;
+
+    const fallbackRelease = setTimeout(releaseHolder, 1_000);
+    try {
+      await expect(
+        context.run(TENANT_B, () =>
+          tenancyTransaction(prisma, service, callback, { maxWait: 50 }),
+        ),
+      ).rejects.toThrow(/P2028|start.*transaction|transaction.*start|timeout/i);
+      expect(callback).not.toHaveBeenCalled();
+    } finally {
+      clearTimeout(fallbackRelease);
+      releaseHolder();
+      await holder;
+    }
+
+    expectNoContext(await queryProbe(prisma));
+  } finally {
+    releaseHolder();
+    await prisma.$disconnect();
+  }
 }
 
 jest.setTimeout(30_000);
@@ -394,6 +443,129 @@ describe(`tenancyTransaction() through PrismaPg ${PRISMA_VERSION}`, () => {
     expect(rolledBack.rows[0].count).toBe(0);
     expect(transactionProbe).toBeDefined();
     expectNoContext(noContext);
+  });
+
+  it('sets a custom setting key transaction-locally without touching the default key', async () => {
+    interface SettingProbe {
+      custom_setting: string | null;
+      default_setting: string | null;
+    }
+
+    const inTransaction = await context.run(TENANT_A, () =>
+      tenancyTransaction(
+        prisma,
+        service,
+        async (tx: any) => {
+          const rows = (await tx.$queryRawUnsafe(`
+            SELECT NULLIF(current_setting('app.pgbouncer_custom_tenant', true), '') AS custom_setting,
+                   NULLIF(current_setting('app.current_tenant', true), '') AS default_setting
+          `)) as SettingProbe[];
+          return rows[0];
+        },
+        { dbSettingKey: 'app.pgbouncer_custom_tenant' },
+      ),
+    );
+
+    const afterTransaction = (await prisma.$queryRawUnsafe(`
+      SELECT NULLIF(current_setting('app.pgbouncer_custom_tenant', true), '') AS custom_setting,
+             NULLIF(current_setting('app.current_tenant', true), '') AS default_setting
+    `)) as SettingProbe[];
+
+    expect(inTransaction).toEqual({
+      custom_setting: TENANT_A,
+      default_setting: null,
+    });
+    expect(afterTransaction[0]).toEqual({
+      custom_setting: null,
+      default_setting: null,
+    });
+  });
+
+  it('runs with the requested PostgreSQL isolation level', async () => {
+    const isolationLevel = await context.run(TENANT_B, () =>
+      tenancyTransaction(
+        prisma,
+        service,
+        async (tx: any) => {
+          const rows = (await tx.$queryRawUnsafe(
+            `SELECT current_setting('transaction_isolation') AS isolation_level`,
+          )) as Array<{ isolation_level: string }>;
+          return rows[0].isolation_level;
+        },
+        { isolationLevel: 'Serializable' },
+      ),
+    );
+
+    expect(isolationLevel).toBe('serializable');
+    expectNoContext(await queryProbe(prisma));
+  });
+
+  it('does not enter the callback when set_config fails', async () => {
+    const callback = jest.fn(async () => 'unexpected');
+
+    await expect(
+      context.run(TENANT_A, () =>
+        tenancyTransaction(prisma, service, callback, {
+          dbSettingKey: 'server_version',
+        }),
+      ),
+    ).rejects.toThrow(/server_version|cannot be changed/i);
+
+    expect(callback).not.toHaveBeenCalled();
+    expectNoContext(await queryProbe(prisma));
+  });
+
+  itPrisma7Adapter('honors maxWait when transaction start is blocked', async () => {
+    const contendedPrisma = createAdapterClient(APP_DATABASE_URL, 1);
+    await expectMaxWaitStartFailure(contendedPrisma, context, service);
+  });
+
+  itPrisma6Adapter('documents that Prisma 6 PrismaPg does not enforce maxWait', async () => {
+    const contendedPrisma = createAdapterClient(APP_DATABASE_URL, 1);
+    const callback = jest.fn(async () => 'continued-after-wait');
+    let releaseHolder!: () => void;
+    let markHolderStarted!: () => void;
+    const holderStarted = new Promise<void>((resolve) => {
+      markHolderStarted = resolve;
+    });
+    const holderRelease = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+
+    await contendedPrisma.$connect();
+    try {
+      const holder = context.run(TENANT_A, () =>
+        tenancyTransaction(contendedPrisma, service, async (tx: any) => {
+          await queryProbe(tx);
+          markHolderStarted();
+          await holderRelease;
+        }),
+      );
+      await holderStarted;
+
+      const startedAt = Date.now();
+      const releaseTimer = setTimeout(releaseHolder, 150);
+      let result: string;
+      try {
+        result = await context.run(TENANT_B, () =>
+          tenancyTransaction(contendedPrisma, service, callback, {
+            maxWait: 50,
+          }),
+        );
+      } finally {
+        clearTimeout(releaseTimer);
+        releaseHolder();
+        await holder;
+      }
+
+      expect(result).toBe('continued-after-wait');
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(100);
+      expect(callback).toHaveBeenCalledTimes(1);
+      expectNoContext(await queryProbe(contendedPrisma));
+    } finally {
+      releaseHolder();
+      await contendedPrisma.$disconnect();
+    }
   });
 
   it('isolates high client concurrency while pool size one queues work', async () => {
@@ -720,12 +892,13 @@ describe('session-mode negative contract', () => {
 });
 
 describePrisma6Native('Prisma 6 native-engine PgBouncer lane', () => {
+  let NativePrismaClient: PrismaConstructor;
   let context: TenancyContext;
   let service: TenancyService;
   let prisma: any;
 
   beforeAll(async () => {
-    const NativePrismaClient = require(GENERATED_V6_NATIVE_CLIENT)
+    NativePrismaClient = require(GENERATED_V6_NATIVE_CLIENT)
       .PrismaClient as PrismaConstructor;
     context = new TenancyContext();
     service = new TenancyService(context);
@@ -789,6 +962,16 @@ describePrisma6Native('Prisma 6 native-engine PgBouncer lane', () => {
     expect(transactionProbe).toBeDefined();
     expectNoContext(noContext);
     expect(noContext.backend_pid).toBe(transactionProbe?.backend_pid);
+  });
+
+  it('honors maxWait when the native connection pool is exhausted', async () => {
+    const contendedUrl = new URL(APP_DATABASE_URL);
+    contendedUrl.searchParams.set('connection_limit', '1');
+    const contendedPrisma = new NativePrismaClient({
+      datasourceUrl: contendedUrl.toString(),
+    });
+
+    await expectMaxWaitStartFailure(contendedPrisma, context, service);
   });
 
   it('keeps transparent interactive transactions isolated', async () => {

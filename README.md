@@ -205,11 +205,11 @@ createPrismaTenancyExtension(tenancyService, {
 | `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
 | `failClosed` | `boolean` | `true` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
-| `interactiveTransactionSupport` | `boolean` | `false` | Enable transparent `set_config` inside interactive transactions. Performs a partial startup check for required Prisma internals; later internal shape changes remain a compatibility risk. Alternative: `tenancyTransaction()` helper |
+| `interactiveTransactionSupport` | `boolean` | `false` | **Deprecated.** Compatibility-only transparent mode based on Prisma internals. Use `tenancyTransaction()` for interactive transactions |
 
 > **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
 
-> **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Enable `interactiveTransactionSupport: true` for transparent handling, or use the `tenancyTransaction()` helper. See [Interactive Transactions](#interactive-transactions) below.
+> **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Use the `tenancyTransaction()` helper. The deprecated `interactiveTransactionSupport: true` mode remains only as a compatibility path for existing consumers. See [Interactive Transactions](#interactive-transactions) below.
 
 > **Migration note:** If you intentionally rely on model queries without tenant context falling through to PostgreSQL RLS, set `failClosed: false` explicitly. Prefer `sharedModels`, `withoutTenant()`, or a separate admin client for intentional unscoped access.
 
@@ -227,14 +227,23 @@ import { tenancyTransaction } from '@nestarc/tenancy';
 await tenancyTransaction(prisma, tenancyService, async (tx) => {
   const user = await tx.user.findFirst();
   await tx.order.create({ data: { userId: user.id } });
+}, {
+  maxWait: 2_000,                 // Wait to start the transaction (ms)
+  timeout: 5_000,                 // Maximum transaction duration (ms)
+  isolationLevel: 'Serializable', // Optional PostgreSQL isolation level
+  dbSettingKey: 'app.current_tenant',
 });
 ```
 
-> **Compatibility note:** `interactiveTransactionSupport: true` relies on Prisma internal APIs. Prefer `tenancyTransaction()` for new code because it uses public Prisma APIs. Use transparent support only when you accept Prisma-version compatibility risk and have E2E coverage for your Prisma version.
+The helper forwards Prisma's public interactive transaction options (`maxWait`, `timeout`, and `isolationLevel`). It resolves the tenant before starting the transaction, applies transaction-local `set_config()` before invoking your callback, and propagates transaction-start, context-setup, callback, timeout, and database errors unchanged.
 
-**Option 2: Transparent mode**
+`maxWait` enforcement belongs to the Prisma runtime. The verified Prisma 7.9.1 `PrismaPg` adapter and Prisma 6.19.3 native engine reject when their client connection pool cannot start in time. Prisma 6.19.3 `PrismaPg` accepts the option but does not enforce it under adapter-pool contention; the matrix keeps this as a negative contract. If bounded transaction admission is required on Prisma 6, use the native engine or enforce admission before calling the helper.
 
-Sets RLS context automatically inside interactive transactions. Startup checks the required `_createItxClient` hook, but cannot guarantee the full internal transaction metadata shape; keep an E2E lane for your exact Prisma version.
+> **Compatibility note:** `interactiveTransactionSupport: true` is deprecated because it relies on Prisma internal APIs. Existing users should keep an exact-version E2E lane while migrating to `tenancyTransaction()`.
+
+**Option 2: Deprecated transparent compatibility mode**
+
+This mode remains available for existing consumers, but is not recommended for new code. Startup checks the required `_createItxClient` hook, but cannot guarantee the full internal transaction metadata shape and can silently miss an interactive transaction after a Prisma internal change.
 
 ```typescript
 const prisma = basePrisma.$extends(
@@ -995,7 +1004,7 @@ This package supports **PgBouncer transaction mode** for pooled application quer
 - Session mode is not a supported application contract. The matrix keeps a pool-size-one negative test that demonstrates backend pinning and a second client remaining queued until the first disconnects.
 - Pool-size-one tests force the same physical backend through tenant A, tenant B, no-context, commit, callback rollback, database-error rollback, and high logical concurrency scenarios. The timeout lane separately verifies rollback and clean state while allowing PgBouncer or the client pool to replace the backend.
 - A pool-size-two lane verifies real overlap on two backends, clean state on both, and clean replacement sessions after PgBouncer `RECONNECT`.
-- `tenancyTransaction()` is the canonical path. The batch extension and optional transparent interactive mode are tested separately; transparent mode retains its Prisma-internal API compatibility risk.
+- `tenancyTransaction()` is the canonical path. Its timeout, isolation, custom-key, context-setup failure, and rollback contracts are exercised against both supported Prisma majors. `maxWait` is positive-tested on Prisma 7 `PrismaPg` and Prisma 6 native, with the Prisma 6 `PrismaPg` limitation fixed as a negative contract. The batch extension and deprecated transparent compatibility mode are tested separately.
 - The runner fails fast unless the Prisma CLI, client, and PostgreSQL adapter all use the same supported major (6 or 7).
 - Prisma Data Proxy, managed PgBouncer services, and other custom pooler settings are not automatically covered by this exact configuration. Re-run the matrix with the mode and prepared-statement settings used in production.
 

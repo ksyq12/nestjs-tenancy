@@ -23,6 +23,12 @@ export interface PrismaTransactionClient<TTx extends PrismaTransactionContext = 
 }
 
 export interface TenancyTransactionOptions {
+  /**
+   * Maximum time in milliseconds to wait for Prisma to start the transaction.
+   * Forwarded to Prisma; enforcement depends on the selected Prisma runtime.
+   */
+  maxWait?: number;
+  /** Maximum time in milliseconds the interactive transaction may run. */
   timeout?: number;
   /** PostgreSQL transaction isolation level. */
   isolationLevel?: 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable';
@@ -39,7 +45,7 @@ export interface TenancyTransactionOptions {
  * @param prisma - PrismaClient instance (not extended — raw client)
  * @param tenancyService - TenancyService to read current tenant
  * @param callback - Function receiving the transaction client
- * @param options - Transaction timeout, isolation level, and DB setting key
+ * @param options - Transaction wait/timeout, isolation level, and DB setting key
  */
 export async function tenancyTransaction<
   T,
@@ -59,6 +65,7 @@ export async function tenancyTransaction<
       return callback(tx);
     },
     {
+      ...(options?.maxWait !== undefined && { maxWait: options.maxWait }),
       ...(options?.timeout !== undefined && { timeout: options.timeout }),
       ...(options?.isolationLevel !== undefined && {
         isolationLevel: options.isolationLevel,
