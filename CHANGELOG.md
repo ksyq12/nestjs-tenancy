@@ -6,6 +6,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-24
+
+### Added
+
+- Added a live PostgreSQL `doctor` command that audits RLS enablement, forced RLS, policies, roles, tenant indexes, and optional active isolation probes.
+- Added Prisma 6 and Prisma 7 PgBouncer transaction-mode E2E coverage, including commit, rollback, timeout, pool contention, and native/driver-adapter paths.
+- Added configurable non-HTTP missing-context diagnostics (`ignore`, `warn`, or `throw`) with telemetry support for propagators and tenant-scoped resources.
+- Added tenant-scoped resource-key and search helpers for cache, Redis, queue, gRPC, Kafka, and search integration paths.
+- Added a strict tarball-installed Nestarc ecosystem compatibility fixture and CI/release gate covering API Keys, RBAC, RLS, Outbox, Jobs, and Webhook flows.
+
+### Changed
+
+- Added `maxWait` forwarding to `tenancyTransaction()` and expanded its transaction failure and isolation-level contracts.
+- Deprecated transparent interactive transaction support in favor of the explicit `tenancyTransaction()` API.
+- Updated the ecosystem compatibility baseline to the published `@nestarc/api-keys@0.3.1` and `@nestarc/jobs@0.3.1` packages.
+
 ## [0.14.0] - 2026-08-02
 
 ### Added

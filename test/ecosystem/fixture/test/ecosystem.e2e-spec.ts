@@ -6,13 +6,11 @@ import type { AddressInfo } from 'node:net';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { ApiKeysService } from '@nestarc/api-keys';
-import { HandlerRegistry, JobsService } from '@nestarc/jobs';
+import { JobsService } from '@nestarc/jobs';
 import { RbacService } from '@nestarc/rbac';
-import { TenancyContext } from '@nestarc/tenancy';
 import {
   WebhookDeliveryWorker,
   WebhookEndpointAdminService,
-  WebhookService,
 } from '@nestarc/webhook';
 import { Client } from 'pg';
 import request from 'supertest';
@@ -103,23 +101,6 @@ describe('installed Nestarc ecosystem compatibility fixture', () => {
     app = moduleRef.createNestApplication();
     await app.init();
 
-    const webhooks = app.get(WebhookService);
-    app.get(HandlerRegistry).register(
-      'webhook.publish',
-      async (payload: { projectId: string; name: string }) => {
-        const tenantId = TenancyContext.getCurrentTenantId();
-        if (!tenantId) throw new Error('Restored job tenant context is required');
-        await webhooks.sendToTenant(
-          tenantId,
-          new ProjectCreatedWebhookEvent(payload.projectId, payload.name, tenantId),
-          {
-            idempotencyKey: `project:${payload.projectId}:created`,
-            correlationId: payload.projectId,
-          },
-        );
-      },
-    );
-
     const apiKeys = app.get(ApiKeysService);
     keyA = await apiKeys.create({
       tenantId: TENANT_A,
@@ -177,10 +158,10 @@ describe('installed Nestarc ecosystem compatibility fixture', () => {
 
   it('loads every package from the isolated installed artifact graph', () => {
     const expected = {
-      '@nestarc/tenancy': '0.14.0',
+      '@nestarc/tenancy': '0.15.0',
       '@nestarc/api-keys': '0.3.1',
       '@nestarc/rbac': '0.2.0',
-      '@nestarc/jobs': '0.3.0',
+      '@nestarc/jobs': '0.3.1',
       '@nestarc/outbox': '0.2.0',
       '@nestarc/webhook': '0.13.0',
     };

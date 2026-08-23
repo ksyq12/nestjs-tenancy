@@ -38,7 +38,7 @@ describe('ecosystem E2E runner', () => {
   it('replaces only declared fixture dependencies with absolute tarballs', () => {
     const manifest = {
       dependencies: {
-        '@nestarc/tenancy': '0.14.0',
+        '@nestarc/tenancy': '0.15.0',
         '@nestarc/rbac': '0.2.0',
       },
     };
@@ -51,7 +51,7 @@ describe('ecosystem E2E runner', () => {
       '@nestarc/tenancy': `file:${path.resolve('./tenancy.tgz')}`,
       '@nestarc/rbac': '0.2.0',
     });
-    expect(manifest.dependencies['@nestarc/tenancy']).toBe('0.14.0');
+    expect(manifest.dependencies['@nestarc/tenancy']).toBe('0.15.0');
     expect(() =>
       applyPackageSpecs(manifest, { '@nestarc/missing': './missing.tgz' }),
     ).toThrow('Fixture dependency is missing');

@@ -7,10 +7,10 @@
   },
   "dependencies": {
     "@nestarc/api-keys": "0.3.1",
-    "@nestarc/jobs": "0.3.0",
+    "@nestarc/jobs": "0.3.1",
     "@nestarc/outbox": "0.2.0",
     "@nestarc/rbac": "0.2.0",
-    "@nestarc/tenancy": "0.14.0",
+    "@nestarc/tenancy": "0.15.0",
     "@nestarc/webhook": "0.13.0",
     "@nestjs/common": "10.4.20",
     "@nestjs/core": "10.4.20",

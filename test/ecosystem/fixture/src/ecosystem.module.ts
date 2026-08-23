@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Inject,
+  Injectable,
   Module,
   Post,
   UseGuards,
@@ -13,6 +14,7 @@ import {
   RequireScope,
 } from '@nestarc/api-keys';
 import {
+  JobHandler,
   JobsModule,
   createOutboxJobsPublisher,
 } from '@nestarc/jobs';
@@ -31,6 +33,7 @@ import { createApiKeySubjectResolver } from '@nestarc/rbac/integrations/api-keys
 import { createTenancyTenantResolver } from '@nestarc/rbac/integrations/tenancy';
 import {
   TenancyModule,
+  TenancyContext,
   TenancyService,
   tenancyTransaction,
 } from '@nestarc/tenancy';
@@ -69,6 +72,25 @@ export class ProjectCreatedWebhookEvent extends WebhookEvent {
     public readonly observedTenantId: string,
   ) {
     super();
+  }
+}
+
+@Injectable()
+class WebhookPublishHandler {
+  constructor(private readonly webhooks: WebhookService) {}
+
+  @JobHandler('webhook.publish')
+  async handle(payload: { projectId: string; name: string }): Promise<void> {
+    const tenantId = TenancyContext.getCurrentTenantId();
+    if (!tenantId) throw new Error('Restored job tenant context is required');
+    await this.webhooks.sendToTenant(
+      tenantId,
+      new ProjectCreatedWebhookEvent(payload.projectId, payload.name, tenantId),
+      {
+        idempotencyKey: `project:${payload.projectId}:created`,
+        correlationId: payload.projectId,
+      },
+    );
   }
 }
 
@@ -177,5 +199,6 @@ const JobsPublisher = createOutboxJobsPublisher({
     }),
   ],
   controllers: [ProjectsController],
+  providers: [WebhookPublishHandler],
 })
 export class EcosystemModule {}

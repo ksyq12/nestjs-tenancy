@@ -2,7 +2,7 @@
 
 - 작성일: 2026-08-21 (Asia/Seoul)
 - 최초 검증 기준 커밋: `2fe5288` (`Release version 0.14.0`)
-- 검증 패키지 버전: `0.14.0`
+- 검증 패키지 버전: `0.15.0`
 - P0 구현 완료: 2026-08-21 (`live DB doctor` + 실제 owner/FORCE 및 active RLS E2E)
 - P0/P1 PgBouncer matrix 완료: 2026-08-23 (transaction mode 지원 계약 + Prisma 6/7 실DB lane)
 - P1 transaction API 대표 경로 완료: 2026-08-23 (`maxWait`·failure/custom key/isolation 계약 + transparent mode deprecation)
@@ -36,7 +36,7 @@
 | TypeORM·Drizzle 보류 | 합리적인 전략 결정 | 패키지는 이미 Prisma/PostgreSQL 전용이다. 현재의 문제는 ORM 확장이 아니라 로드맵의 과잉 약속과 핵심 경로의 운영 보증 부족이다. |
 | 자체 수요가 가장 강하고 선점 가능 | 공개 근거 부족 및 일부 반증 | 더 많이 다운로드되는 직접 경쟁 패키지와 Prisma 공식 RLS가 존재한다. 경쟁 우위는 RLS 자체보다 NestJS 운영 통합에서 찾아야 한다. |
 
-핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로, non-HTTP missing-context diagnostics P1, strict install을 포함한 Nestarc ecosystem compatibility harness P2를 완료했다. 다음 cross-package 우선순위는 jobs handler 초기화 계약을 소유 패키지에서 정리하는 일이다.
+핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로, non-HTTP missing-context diagnostics P1, strict install을 포함한 Nestarc ecosystem compatibility harness P2를 완료했다. 하네스가 드러낸 API Keys peer metadata와 Jobs handler 초기화 cross-package 공백도 각각 `0.3.1` release와 published-only E2E로 닫았다.
 
 ## 3. 검증 방법과 실행 결과
 
@@ -200,12 +200,12 @@ npm run test:e2e:ecosystem
 - ecosystem E2E: 1 suite, 3 tests 통과
 - 로컬 검증 환경: Node.js 24.11.1, NestJS 10.4.20, Prisma 6.19.3, PostgreSQL 16.14
 - CI/release lane은 Node.js 22와 PostgreSQL 16에서 같은 명령을 실행하며 release publish의 필수 선행 job이다.
-- 현재 `@nestarc/tenancy@0.14.0`과 로컬 형제 저장소의 `api-keys@0.3.1`, `rbac@0.2.0`, `jobs@0.3.0`, `outbox@0.2.0`, `webhook@0.13.0`을 각각 tarball로 설치해 검증했다. `@nestarc/api-keys@0.3.1` 배포 후 형제 저장소 탐색을 비활성화한 published-only strict lane도 재실행해 실제 npm package 설치, Prisma 6 client 생성, installed artifact version, 두 핵심 runtime scenario를 포함한 3개 test가 모두 통과했다.
+- 현재 `@nestarc/tenancy@0.15.0`과 로컬 형제 저장소의 `api-keys@0.3.1`, `rbac@0.2.0`, `jobs@0.3.1`, `outbox@0.2.0`, `webhook@0.13.0`을 각각 tarball로 설치해 검증했다. API Keys와 Jobs `0.3.1` 배포 후 형제 저장소 탐색을 비활성화한 published-only strict lane도 재실행해 실제 npm package 설치, Prisma 6 client 생성, installed artifact version, 두 핵심 runtime scenario를 포함한 3개 test가 모두 통과했다.
 - API key로 tenant identity를 결정하고 선택적 `X-Tenant-Id` assertion의 불일치를 403으로 차단했다. 같은 identity가 tenancy ALS, RBAC subject/tenant, Prisma transaction-local RLS setting에 사용되는 것을 확인했다.
 - tenant A/B가 각각 자기 RLS row만 조회하고, outbox record의 tenant가 jobs context로 복원되며, webhook event/endpoint filtering과 서명된 실제 HTTP delivery가 해당 tenant 수신 경로에만 도달하는 것을 확인했다.
 - API key 누락, API key와 asserted tenant 불일치, RBAC role 누락은 모두 project/outbox/webhook side effect 이전에 실패했다.
 - API Keys의 Prisma 5.22.0/6.19.3 실DB storage contract와 tarball consumer 검증 후 optional `@prisma/client` peer가 `^5.0.0 || ^6.0.0`으로 확대됐다. fixture runner는 `--legacy-peer-deps`와 `--force` 없이 strict `npm install`을 사용하며 로컬 API Keys tarball로 전체 runtime graph를 통과했다.
-- `@nestarc/jobs` decorator handler를 같은 상위 fixture module에서 자동 발견할 때 provider 의존성이 초기화되기 전 instance가 등록되는 순서를 관찰했다. 하네스는 공개 `HandlerRegistry`에 app init 이후 handler를 등록해 deterministic runtime contract를 사용한다.
+- `@nestarc/jobs@0.3.1`은 decorator discovery와 worker/consumer 시작을 application bootstrap으로 지연하고 singleton handler 등록 완료 후 소비를 시작한다. 하네스는 constructor-injected `WebhookPublishHandler`의 `@JobHandler('webhook.publish')` 자동 발견을 사용하며 수동 `HandlerRegistry` workaround를 제거했다.
 
 ## 4. 상세 검증 결과
 
@@ -354,7 +354,7 @@ api-keys → tenancy ALS → rbac → Prisma/RLS + outbox → jobs → webhook H
 
 - 로컬 tarball과 npm published `@nestarc/api-keys@0.3.1`의 strict install을 보증한다. published-only 재검증에서 설치 artifact version과 runtime behavior를 포함한 전체 3개 test가 통과했으며 API Keys peer metadata 관련 잔여 workaround는 없다.
 - 현재 cross-package runtime lane은 모든 패키지의 교집합인 NestJS 10 + Prisma 6이다. Prisma 7 전체 ecosystem lane은 api-keys/rbac/outbox/webhook의 peer 및 runtime 지원이 먼저 필요하다.
-- jobs consumer는 공개 `HandlerRegistry`를 app init 이후 사용한다. decorator auto-discovery가 상위 module provider의 DI 완료 전에 instance를 캡처하는 초기화 순서는 jobs package에서 별도 회귀 계약으로 정리해야 한다.
+- Jobs `0.3.1`의 application-bootstrap discovery로 상위 module provider의 constructor DI와 `onModuleInit()` 이후 handler 등록을 보증한다. request/transient 또는 non-static dependency tree handler는 fail-fast하며, in-memory/BullMQ와 Nest 10/11 회귀 matrix가 이를 보존한다.
 - in-memory jobs backend를 사용하지만 outbox persistence, Prisma/RLS DB, webhook persistence/worker/HTTP transport는 실제 구현이다. Redis/BullMQ 내구성은 별도 P1 Redis lane이 담당한다.
 
 ### 4.4 Redis·검색·queue context 누락 진단: P1 구현 완료
@@ -613,6 +613,7 @@ TypeORM·Drizzle·MikroORM은 실제 구현이 아니라 roadmap/research에만 
 5. ✅ CI/release publish gate에 Node 22 ecosystem job을 추가했다.
 6. ✅ API Keys의 Prisma 5/6 peer metadata와 실DB contract를 정리하고 peer bypass flag 없는 clean strict install을 통과했다.
 7. ✅ npm published `@nestarc/api-keys@0.3.1`만 사용하는 published-only strict lane 3개 test를 통과했다.
+8. ✅ Jobs `0.3.1`의 bootstrap handler discovery를 적용해 manual registry workaround를 제거하고 published-only strict lane 3개 test를 통과했다.
 
 ### 보류 — TypeORM·Drizzle
 
@@ -627,11 +628,11 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 3. 기준 커밋 `2fe5288` 이후 transaction, CLI, E2E, CI 변경 여부를 diff한다.
 4. 구현 요청이 아니라 재검증 요청이면 전체 unit/build/lint/direct E2E와 Prisma 6/7 PgBouncer E2E를 다시 실행한다.
 5. 시장 판단이 필요하면 npm 수치와 Prisma/Yates/UseBetter 상태를 다시 조회한다.
-6. 다음 구현 작업은 `@nestarc/jobs` handler discovery 초기화 계약을 소유 저장소에서 수정한다.
+6. API Keys와 Jobs cross-package workaround는 완료됐다. 다음 구현은 이 문서의 완료 계약을 회귀 gate로 보존하면서 별도 범위로 결정한다.
 
 추천 후속 구현 작업:
 
-> `@nestarc/jobs` decorator handler의 상위 module DI 초기화 순서를 회귀 테스트하고 manual `HandlerRegistry` workaround를 제거한다.
+> 다음 기능 범위를 결정하기 전에 전체 회귀 suite와 ecosystem published-only lane을 실행하고, Prisma 7 ecosystem 확대 또는 보류 중인 roadmap 항목을 별도 제안으로 평가한다.
 
 ## 8. 세션 재개용 짧은 프롬프트
 
@@ -641,6 +642,6 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 docs/tenancy-strategy-validation-2026-08-21.md를 읽고 현재 HEAD와 차이를 확인한 뒤,
 완료된 live DB doctor/RLS P0, PgBouncer P0/P1 matrix, transaction API P1 대표 경로,
 non-HTTP missing-context diagnostics P1과 ecosystem compatibility harness P2의 회귀를 보존하면서
-jobs handler discovery workaround의 다음 작업을 구현해 주세요.
+API Keys/Jobs cross-package 계약을 포함한 ecosystem harness의 회귀를 확인하고 다음 별도 범위를 제안해 주세요.
 시장 수치는 스냅샷이므로 구현 판단에 필요할 때만 최신화하세요.
 ```
