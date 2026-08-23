@@ -6,7 +6,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
-    "@nestarc/api-keys": "0.3.0",
+    "@nestarc/api-keys": "0.3.1",
     "@nestarc/jobs": "0.3.0",
     "@nestarc/outbox": "0.2.0",
     "@nestarc/rbac": "0.2.0",

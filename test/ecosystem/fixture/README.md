@@ -8,7 +8,8 @@ from `package.json`.
 
 The graph is intentionally fixed to Node 22, NestJS 10, and Prisma 6.19.3,
 which is the runtime intersection of tenancy, RBAC, outbox, jobs, and webhook.
-`@nestarc/api-keys@0.3.0` still declares its optional Prisma peer as Prisma 5
-only, so the runner currently uses `npm install --legacy-peer-deps`. The fixture
-does not use the API keys Prisma adapter and verifies the full runtime path, but
-a clean strict install remains a known ecosystem metadata gap.
+The runner uses strict `npm install` without `--legacy-peer-deps` or `--force`.
+The API Keys tarball used by the local sibling-package path declares and tests
+its optional Prisma peer against Prisma 5 and 6. Published-only CI/release runs
+must use `@nestarc/api-keys@0.3.1` or a later compatible release containing that
+widened peer metadata.

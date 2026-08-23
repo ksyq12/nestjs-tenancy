@@ -178,7 +178,7 @@ describe('installed Nestarc ecosystem compatibility fixture', () => {
   it('loads every package from the isolated installed artifact graph', () => {
     const expected = {
       '@nestarc/tenancy': '0.14.0',
-      '@nestarc/api-keys': '0.3.0',
+      '@nestarc/api-keys': '0.3.1',
       '@nestarc/rbac': '0.2.0',
       '@nestarc/jobs': '0.3.0',
       '@nestarc/outbox': '0.2.0',

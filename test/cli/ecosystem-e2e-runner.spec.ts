@@ -25,13 +25,14 @@ describe('ecosystem E2E runner', () => {
     expect(applyDefaultEnv(custom)).toEqual(custom);
   });
 
-  it('keeps the known API keys optional-peer workaround explicit', () => {
+  it('uses strict npm install without peer-dependency bypass flags', () => {
     expect(FIXTURE_INSTALL_ARGS).toEqual([
       'install',
-      '--legacy-peer-deps',
       '--no-audit',
       '--no-fund',
     ]);
+    expect(FIXTURE_INSTALL_ARGS).not.toContain('--legacy-peer-deps');
+    expect(FIXTURE_INSTALL_ARGS).not.toContain('--force');
   });
 
   it('replaces only declared fixture dependencies with absolute tarballs', () => {

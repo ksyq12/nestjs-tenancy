@@ -22,7 +22,6 @@ const DEFAULT_APP_DATABASE_URL =
   'postgresql://ecosystem_app:ecosystem_app@127.0.0.1:5433/tenancy_test';
 const FIXTURE_INSTALL_ARGS = [
   'install',
-  '--legacy-peer-deps',
   '--no-audit',
   '--no-fund',
 ];
@@ -129,9 +128,6 @@ function main() {
       `${JSON.stringify(applyPackageSpecs(manifest, packageSpecs), null, 2)}\n`,
     );
 
-    // api-keys@0.3.0 still declares its optional Prisma peer as ^5 while the
-    // rest of this graph intersects on Prisma 6. Keep this explicit until that
-    // package widens its metadata; the E2E verifies the runtime graph itself.
     run('npm', FIXTURE_INSTALL_ARGS, { cwd: fixtureDirectory });
     run('npx', ['prisma', 'generate', '--schema', 'prisma/schema.prisma'], {
       cwd: fixtureDirectory,
