@@ -148,7 +148,7 @@ Prisma 전용이라는 한계를 벗어나면 사용자 풀이 넓어진다.
 
 ### 4.5-3. 안정화 및 CLI 강화 ✅
 
-- `interactiveTransactionSupport` — experimental에서 stable로 승격 ✅
+- `interactiveTransactionSupport` — opt-in 구현 완료; Prisma 내부 API 의존으로 exact-version E2E 필요 ⚠️
 - CLI `check` — FORCE/POLICY/key 포함 deep validation ✅
 - CLI `--dry-run` — 파일 미생성 미리보기 ✅
 - `@@schema` 다중 스키마 — schema-qualified SQL 생성 ✅
@@ -186,7 +186,8 @@ Prisma 전용이라는 한계를 벗어나면 사용자 풀이 넓어진다.
 
 ### 5-1. 보안 강화
 
-- 커넥션 풀 격리 검증 (PgBouncer, Prisma Data Proxy 호환)
+- PgBouncer transaction mode 커넥션 격리 검증 ✅ (pool size 1/2, 재사용·교체·실패 cleanup, Prisma 6/7 실DB CI matrix/gate 추가)
+- Prisma Data Proxy 및 기타 managed pooler 호환성 검증 ⏳
 - tenant_id 위조 방지 (JWT claim과 헤더 교차 검증)
 - 감사 로그 (누가, 어떤 tenant에, 언제 접근했는지)
 

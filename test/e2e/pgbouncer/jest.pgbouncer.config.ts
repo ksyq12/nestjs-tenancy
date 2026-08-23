@@ -2,9 +2,10 @@ import type { Config } from 'jest';
 
 const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
-  rootDir: '../..',
-  testRegex: 'test/e2e/.*\\.e2e-spec\\.ts$',
-  testPathIgnorePatterns: ['<rootDir>/test/e2e/pgbouncer/'],
+  rootDir: '../../..',
+  testMatch: [
+    '<rootDir>/test/e2e/pgbouncer/pgbouncer.e2e-spec.ts',
+  ],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',

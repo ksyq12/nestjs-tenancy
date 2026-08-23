@@ -1,0 +1,31 @@
+// Prisma 6 driver-adapter client used by the PgBouncer compatibility lane.
+// Prisma 6 requires a datasource URL in the schema, while Prisma 7 keeps it
+// exclusively in Prisma Config, so the rolling major lanes use separate files.
+generator client {
+  provider            = "prisma-client"
+  output              = "./generated"
+  moduleFormat        = "cjs"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int    @id @default(autoincrement())
+  tenant_id String
+  name      String
+  email     String
+
+  @@map("users")
+}
+
+model Country {
+  id   Int    @id @default(autoincrement())
+  name String
+  code String
+
+  @@map("countries")
+}

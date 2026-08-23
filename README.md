@@ -30,6 +30,7 @@ One line of code. Automatic tenant isolation.
 - **CLI scaffolding** — `npx @nestarc/tenancy init` generates RLS policies and module config
 - **CLI drift detection** — `npx @nestarc/tenancy check` validates SQL against Prisma schema
 - **Live DB doctor** — `npx @nestarc/tenancy doctor` audits the runtime role, RLS catalogs, policy drift, and optional fail-closed behavior
+- **PgBouncer matrix** — transaction-mode isolation, forced backend reuse/replacement, and Prisma 6/7 are covered by a real-database CI matrix
 - **Multi-schema support** — `@@schema()` directives generate schema-qualified SQL (e.g., `"auth"."users"`)
 - **ccTLD-aware subdomain extraction** — accurate parsing for `.co.uk`, `.co.jp`, `.com.au`, etc.
 - **Framework-agnostic** — public API uses `TenancyRequest` / `TenancyResponse` instead of Express types. Works with Express, Fastify, and raw Node.js HTTP
@@ -204,7 +205,7 @@ createPrismaTenancyExtension(tenancyService, {
 | `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
 | `failClosed` | `boolean` | `true` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
-| `interactiveTransactionSupport` | `boolean` | `false` | Enable transparent `set_config` inside interactive transactions. Validates Prisma compatibility at startup — throws immediately if unsupported. Alternative: `tenancyTransaction()` helper |
+| `interactiveTransactionSupport` | `boolean` | `false` | Enable transparent `set_config` inside interactive transactions. Performs a partial startup check for required Prisma internals; later internal shape changes remain a compatibility risk. Alternative: `tenancyTransaction()` helper |
 
 > **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
 
@@ -218,7 +219,7 @@ The default Prisma extension wraps queries in batch transactions, which breaks i
 
 **Option 1: `tenancyTransaction()` helper (recommended)**
 
-Uses only public Prisma APIs. Works with all Prisma versions.
+Uses only public Prisma APIs. The supported Prisma 6 and 7 majors are covered by the real-database PgBouncer matrix.
 
 ```typescript
 import { tenancyTransaction } from '@nestarc/tenancy';
@@ -233,7 +234,7 @@ await tenancyTransaction(prisma, tenancyService, async (tx) => {
 
 **Option 2: Transparent mode**
 
-Sets RLS context automatically inside interactive transactions. Validates Prisma compatibility at startup.
+Sets RLS context automatically inside interactive transactions. Startup checks the required `_createItxClient` hook, but cannot guarantee the full internal transaction metadata shape; keep an E2E lane for your exact Prisma version.
 
 ```typescript
 const prisma = basePrisma.$extends(
@@ -974,7 +975,7 @@ try {
 ## Security
 
 - **SQL Injection**: The Prisma extension uses `set_config()` with bind parameters via `$executeRaw` tagged template. This eliminates SQL injection risk at the database layer. Additionally, tenant IDs are validated by the middleware (UUID format by default).
-- **Transaction-scoped**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL` — scoped to the batch transaction. No cross-request leakage via connection pool.
+- **Transaction-scoped**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL` and is scoped to the database transaction. The supported PgBouncer transaction-mode matrix verifies A → B → no-context isolation on reused physical backends.
 - **Custom validators**: If your tenant IDs are not UUIDs, provide a `validateTenantId` function that rejects any unsafe input.
 
 ### RLS Operational Notes
@@ -983,7 +984,28 @@ try {
 - **Index the tenant column**: RLS policies behave like implicit filters. Add an index on `tenant_id` (or your configured tenant column) for every tenant-scoped table. The CLI now generates this index and `tenancy check` warns when it is missing.
 - **Keep policies simple**: The generated policy is a direct equality check. If you replace it with subqueries or non-leakproof functions, validate query plans under realistic data volume.
 - **RLS is not resource isolation**: It does not prevent noisy-neighbor CPU/IO issues, cache key leaks, or cross-tenant data in Redis/search queues. Include tenant IDs in non-database cache keys and job payloads.
-- **PgBouncer/Prisma**: Prisma requires PgBouncer transaction mode, and prepared-statement settings depend on your PgBouncer version. Test RLS behavior with the same pooler mode used in production.
+- **PgBouncer/Prisma**: Use the [verified transaction-mode contract](#pgbouncer-support-contract) below and re-run it for any production-specific pooler configuration.
+
+### PgBouncer Support Contract
+
+This package supports **PgBouncer transaction mode** for pooled application queries. The repository matrix currently verifies PostgreSQL 16.14, PgBouncer 1.25.2, Prisma 6.19.3, and Prisma 7.9.1.
+
+- Configure `pool_mode = transaction` and `max_prepared_statements = 200`. With the tested PgBouncer 1.25.2 configuration, do not add the legacy `pgbouncer=true` URL parameter.
+- Use a direct PostgreSQL URL for Prisma CLI, migration, and test setup operations. Route application queries through the PgBouncer URL.
+- Session mode is not a supported application contract. The matrix keeps a pool-size-one negative test that demonstrates backend pinning and a second client remaining queued until the first disconnects.
+- Pool-size-one tests force the same physical backend through tenant A, tenant B, no-context, commit, callback rollback, database-error rollback, and high logical concurrency scenarios. The timeout lane separately verifies rollback and clean state while allowing PgBouncer or the client pool to replace the backend.
+- A pool-size-two lane verifies real overlap on two backends, clean state on both, and clean replacement sessions after PgBouncer `RECONNECT`.
+- `tenancyTransaction()` is the canonical path. The batch extension and optional transparent interactive mode are tested separately; transparent mode retains its Prisma-internal API compatibility risk.
+- The runner fails fast unless the Prisma CLI, client, and PostgreSQL adapter all use the same supported major (6 or 7).
+- Prisma Data Proxy, managed PgBouncer services, and other custom pooler settings are not automatically covered by this exact configuration. Re-run the matrix with the mode and prepared-statement settings used in production.
+
+Reproduce the pinned local matrix with Docker:
+
+```bash
+npm run test:e2e:pgbouncer
+```
+
+CI and release workflows run this command against the pinned Prisma 6.19.3 and 7.9.1 lanes. See [`docker-compose.yml`](./docker-compose.yml), [`scripts/test-pgbouncer-e2e.js`](./scripts/test-pgbouncer-e2e.js), and the [PgBouncer E2E specification](./test/e2e/pgbouncer/pgbouncer.e2e-spec.ts).
 
 ### Security Considerations
 

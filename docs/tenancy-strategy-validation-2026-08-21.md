@@ -1,9 +1,10 @@
 # `@nestarc/tenancy` 전략·기능 검증 및 세션 인수인계
 
 - 작성일: 2026-08-21 (Asia/Seoul)
-- 검증 기준 커밋: `2fe5288` (`Release version 0.14.0`)
+- 최초 검증 기준 커밋: `2fe5288` (`Release version 0.14.0`)
 - 검증 패키지 버전: `0.14.0`
 - P0 구현 완료: 2026-08-21 (`live DB doctor` + 실제 owner/FORCE 및 active RLS E2E)
+- P0/P1 PgBouncer matrix 완료: 2026-08-23 (transaction mode 지원 계약 + Prisma 6/7 실DB lane)
 - 목적: 다음 Codex/개발 세션에서 조사 맥락을 다시 수집하지 않고 구현 우선순위를 바로 결정할 수 있도록 근거와 결론을 보존한다.
 
 ## 1. 검증 대상
@@ -24,15 +25,15 @@
 
 | 제안 | 최종 판정 | 정확한 해석 |
 | --- | --- | --- |
-| 안정적인 interactive transaction API | 이미 구현됨 + 잔여 호환성 위험 | public API 기반 `tenancyTransaction()`은 이미 존재한다. 실제 문제는 Prisma 내부 API를 사용하는 선택적 transparent mode와 부족한 실DB 호환성 매트릭스다. |
-| PgBouncer/pool E2E | 실제 보증 공백 | direct PostgreSQL E2E만 있고 PgBouncer, pool mode, 강제 connection 재사용 검증이 없다. 현재 tenant leak이 재현된 것은 아니다. |
+| 안정적인 interactive transaction API | 이미 구현됨 + 잔여 호환성 위험 | public API 기반 `tenancyTransaction()`과 Prisma 6/7 PgBouncer 실DB matrix가 존재한다. 잔여 위험은 transparent mode의 Prisma 내부 API 의존성과 `maxWait`·custom key·isolation·transaction 시작 실패 계약이다. |
+| PgBouncer/pool E2E | P0/P1 구현 완료 + 지원 범위 고정 | PgBouncer 1.25.2 transaction mode를 지원 계약으로 정하고, 강제 재사용·교체·동시성·실패 cleanup을 Prisma 6/7 실DB lane에서 검증한다. session mode는 비지원 negative contract다. |
 | 패키지 간 통합 테스트 키트 | 실제 신규 기능 공백 | 현재 `./testing`은 단일 패키지용 helper뿐이다. 공개 Nestarc 저장소에서도 전체 체인의 자동화 테스트를 찾지 못했다. |
 | Redis·검색·queue 누락 진단 | 부분 구현 + 실제 진단 공백 | transport propagator와 tenant-aware cache는 존재한다. 하지만 non-HTTP 누락은 대부분 silent/pass-through이며 실 Redis/search E2E가 없다. |
-| 운영 DB `doctor` | P0 구현 완료 + 후속 범위 분리 | live DB catalog/role/policy와 opt-in active fail-closed probe를 구현했다. manifest batch와 PgBouncer 재사용 검증은 후속이다. |
+| 운영 DB `doctor` | P0 구현 완료 + 후속 범위 분리 | live DB catalog/role/policy와 opt-in active fail-closed probe를 구현했다. manifest batch는 후속이며, PgBouncer 재사용은 별도 matrix에서 완료했다. |
 | TypeORM·Drizzle 보류 | 합리적인 전략 결정 | 패키지는 이미 Prisma/PostgreSQL 전용이다. 현재의 문제는 ORM 확장이 아니라 로드맵의 과잉 약속과 핵심 경로의 운영 보증 부족이다. |
 | 자체 수요가 가장 강하고 선점 가능 | 공개 근거 부족 및 일부 반증 | 더 많이 다운로드되는 직접 경쟁 패키지와 Prisma 공식 RLS가 존재한다. 경쟁 우위는 RLS 자체보다 NestJS 운영 통합에서 찾아야 한다. |
 
-핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. 이번 P0에서 live doctor 공백과 잘못 이름 붙은 FORCE E2E는 해소했으며, PgBouncer 및 나머지 production matrix는 아래 우선순위에 남아 있다.
+핵심적으로, 최초 조사는 “현재 패키지가 깨져 있다”는 결론이 아니었다. 기본 경로의 테스트는 모두 통과했고 조건부 호환성 결함, 잘못 이름 붙은 E2E 한 건, production guarantee의 공백을 확인했다. live doctor/FORCE RLS P0에 이어 PgBouncer P0/P1 matrix까지 완료했다. 남은 우선순위는 public transaction API의 세부 option·failure contract와 non-HTTP 진단이다.
 
 ## 3. 검증 방법과 실행 결과
 
@@ -71,6 +72,7 @@ npm run test:e2e
 
 ```bash
 npm test -- --runInBand
+npm run test:cov -- --runInBand
 npm run build
 npm run lint
 npm run test:e2e
@@ -88,6 +90,36 @@ npm ls pg --omit=dev
 - live doctor의 catalog-only, active A/B, application-owner 위험, 예상 밖 permissive policy drift를 실제 PostgreSQL에서 검증했다.
 - 실제 table owner에 `FORCE ROW LEVEL SECURITY`가 적용되는 경로와 application role의 no-context SELECT/INSERT fail-closed를 검증했다.
 - 배포 산출물에 `dist/cli/doctor.js`가 포함되고, `pg`가 production dependency로 설치되는 것을 확인했다.
+
+### 3.4 P0/P1 PgBouncer matrix 구현 후 실행 검증
+
+PgBouncer 지원 계약과 CI/release gate를 추가한 뒤 다음을 실행했다.
+
+```bash
+npm test -- --runInBand
+npm run test:cov -- --runInBand
+npm run build
+npm run lint
+npm run test:e2e
+npm run test:e2e:pgbouncer
+```
+
+Prisma 6 lane은 CI와 동일하게 `prisma`, `@prisma/client`, `@prisma/adapter-pg`를 6.x로 교체한 뒤 같은 PgBouncer 명령을 실행했다.
+
+결과:
+
+- unit/coverage: 43 suites, 523 tests 통과
+- coverage: 전체 statements 99.21%, branches 97.51%, functions 100%, lines 99.24%
+- build 및 lint: 통과
+- direct PostgreSQL E2E: 3 suites, 31 tests 통과
+- PgBouncer + Prisma 7.9.1: 적용 대상 13 tests 통과, Prisma 6 native 전용 3 tests skip
+- PgBouncer + Prisma 6.19.3: 16 tests 모두 통과
+- 실행 환경: 로컬 Node.js 24.11.1, PostgreSQL 16.14, PgBouncer 1.25.2; CI PgBouncer lane은 Node.js 22
+- transaction pool size 1에서 동일 물리 backend PID로 tenant A → tenant B → no-context를 실행해 context 잔류가 없음을 확인했다.
+- commit, callback rollback, DB error rollback, interactive transaction timeout과 높은 논리 동시성 뒤 cleanup을 확인했다.
+- pool size 2에서 실제 두 backend의 병렬 사용과 `RECONNECT` 이후 새 backend의 clean state를 확인했다.
+- helper, 기본 batch extension, transparent interactive mode를 독립 시나리오로 기록했다. named prepared statement positive assertion은 이를 지원하는 Prisma 7 adapter에서 수행하며, Prisma 6 adapter는 callback 지원 여부에 따라 조건부로 관찰한다.
+- CI와 release가 Prisma 6/7 PgBouncer job을 통과해야 하며, release publish는 이 job을 필수 선행 조건으로 둔다.
 
 ## 4. 상세 검증 결과
 
@@ -130,11 +162,10 @@ startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__interna
 
 #### 남은 보증 공백
 
-- Prisma 6 CI lane은 unit/build만 수행하며 실DB E2E를 수행하지 않는다: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml#L37).
-- 실DB E2E는 기본 Prisma 7 개발 버전 한 lane뿐이다.
+- Prisma 6/7 모두 PgBouncer 실DB lane을 수행한다. 다만 direct PostgreSQL 전용 E2E는 기본 Prisma 7 개발 버전 한 lane이다.
 - helper option에는 Prisma interactive transaction의 `maxWait`가 없다.
-- callback 실패 후 실제 write rollback, `set_config` 실패, `$transaction` 시작 실패의 실DB 검증이 없다.
-- custom setting key, timeout, isolation level의 실DB 의미를 검증하지 않는다.
+- callback/DB error rollback과 timeout cleanup은 PgBouncer 실DB에서 검증한다. `set_config` 실패와 `$transaction` 시작 실패의 실DB 주입 검증은 남아 있다.
+- custom setting key와 isolation level의 실DB 의미를 검증하지 않는다.
 - 일부 unit test는 이름과 달리 실제 setting 값과 callback 이전 실행 순서를 assert하지 않는다.
 
 #### 권장 결정
@@ -143,36 +174,53 @@ startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__interna
 - public helper의 Prisma 버전별 실DB 계약과 failure semantics를 강화한다.
 - transparent mode는 전체 내부 contract를 fail-fast로 검사하거나 장기적으로 experimental/deprecated 경로로 낮춘다.
 
-### 4.2 PgBouncer/connection pool E2E: 실제로 없는 production guarantee
+### 4.2 PgBouncer/connection pool E2E: P0/P1 지원 계약 구현 완료
 
-현재 Docker/CI/release는 PostgreSQL 직접 연결만 사용한다.
+#### 지원 계약
 
-- Compose 서비스는 PostgreSQL 하나: [`docker-compose.yml`](../docker-compose.yml#L1)
-- E2E runner 기본 URL은 `localhost:5433` direct PostgreSQL: [`scripts/test-e2e.js`](../scripts/test-e2e.js#L12)
-- CI E2E는 PostgreSQL 16 단일 lane: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml#L59)
-- release도 동일 direct E2E만 사용: [`.github/workflows/release.yml`](../.github/workflows/release.yml#L23)
-- roadmap 자체도 pool/PgBouncer 검증을 미완료로 둔다: [`docs/roadmap.md`](./roadmap.md#L185)
+- 지원 pool mode는 PgBouncer **transaction mode**다. 이는 Prisma의 공식 PgBouncer 계약과 일치한다.
+- 검증 기준은 PostgreSQL 16.14와 보안 수정이 포함된 PgBouncer 1.25.2이며, Compose image를 tag와 digest로 고정했다.
+- `max_prepared_statements = 200`을 명시한다. PgBouncer 1.21 이상에서는 Prisma URL에 과거 호환용 `pgbouncer=true`를 붙이지 않는다.
+- matrix의 fixture setup은 direct PostgreSQL URL로 실행한다. 운영에서도 Prisma CLI/migration은 direct URL을 사용하고 application query만 PgBouncer로 보낸다.
+- session mode는 지원 범위가 아니다. pool size 1에서 첫 logical client가 backend를 pin하고 다음 client가 첫 client의 disconnect까지 대기하는 negative contract를 유지한다.
+- 이 matrix는 현재 명시한 self-hosted 구성의 보증이다. 임의의 managed pooler 설정이나 Prisma 8 Early Access까지 일반화하지 않는다.
+- runner는 Prisma CLI/client/adapter major가 모두 같은 지원 버전 6 또는 7인지 시작 시 검사하고, 혼합 설치와 Prisma 8은 fail-fast 처리한다.
 
-현재 raw PostgreSQL E2E는 `SET LOCAL`이 commit 뒤 사라지는지, 서로 다른 direct connection이 격리되는지를 검증한다.
+공식 근거:
 
-- [`test/e2e/prisma-tenancy.e2e-spec.ts`](../test/e2e/prisma-tenancy.e2e-spec.ts#L69)
+- [Prisma PgBouncer 연결 가이드](https://www.prisma.io/docs/orm/prisma-client/setup-and-configuration/databases-connections/pgbouncer)
+- [PgBouncer prepared statement 설정](https://www.pgbouncer.org/config#max_prepared_statements)
+- [PostgreSQL `set_config(..., true)` 계약](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SET)
 
-그러나 이는 외부 pooler의 mode, prepared statement 설정, 물리 connection 재사용을 통과하는 검증이 아니다. README는 pool leak이 없다고 설명하면서 실제 운영과 같은 PgBouncer mode 검증을 사용자에게 맡긴다.
+#### 재현 환경
 
-- [`README.md`](../README.md#L973)
+대표 재현 명령 `npm run test:e2e:pgbouncer`은 Compose lifecycle, Prisma client 생성과 아래 세 lane의 Jest 검증을 한 번에 수행한다.
 
-최소 권장 매트릭스:
+| Host port | Mode | 물리 pool | 목적 |
+| ---: | --- | ---: | --- |
+| `6432` | transaction | 1 | 강제 재사용, 순차 격리, 실패/timeout/동시성 cleanup |
+| `6433` | session | 1 | pinning과 starvation을 고정하는 비지원 negative test |
+| `6434` | transaction | 2 | 실제 병렬 backend 사용, cleanup, connection 교체 |
 
-- PgBouncer transaction mode의 지원 조합
-- session mode의 명시적 지원/비지원 또는 negative test
-- pool size 1로 물리 connection 재사용 강제
-- tenant A → tenant B → no-context 순차 실행
-- commit, rollback, callback error, timeout 뒤 setting 제거
-- 높은 동시성에서 connection 교체와 재사용
-- Prisma 6/7 및 향후 Prisma 8 지원 범위별 실제 DB lane
-- helper mode와 transparent mode를 분리해 결과 기록
+구현 근거:
 
-판정은 “현재 leak 확인”이 아니라 “leak이 없다는 production claim을 뒷받침할 매트릭스 부재”다.
+- Compose profile과 고정 image: [`docker-compose.yml`](../docker-compose.yml)
+- 고정 PgBouncer 설정: [`test/e2e/pgbouncer/`](../test/e2e/pgbouncer/)
+- 재현 runner: [`scripts/test-pgbouncer-e2e.js`](../scripts/test-pgbouncer-e2e.js)
+- 보안 시나리오: [`test/e2e/pgbouncer/pgbouncer.e2e-spec.ts`](../test/e2e/pgbouncer/pgbouncer.e2e-spec.ts)
+
+#### 검증된 동작
+
+- transaction pool size 1의 동일 backend PID에서 `tenancyTransaction()`으로 tenant A → tenant B → no-context를 순서대로 실행해 tenant setting이 다음 transaction에 남지 않음을 검증한다.
+- 정상 commit, callback error rollback, DB error rollback, Prisma interactive transaction timeout 뒤 clean state를 검증한다.
+- pool size 1보다 많은 logical client를 동시에 실행해 queueing 중에도 tenant별 결과가 섞이지 않는지 검증한다.
+- pool size 2에서 두 물리 backend가 실제로 겹쳐 사용되는지 확인하고, 양쪽의 no-context 상태와 PgBouncer `RECONNECT` 뒤 새 backend의 clean state를 확인한다.
+- canonical helper, 기본 batch extension, 선택적 transparent interactive mode를 별도 결과로 기록한다.
+- Prisma 7 PrismaPg adapter의 opt-in named prepared statement가 PgBouncer를 통과하는지 검증한다. Prisma 6 adapter는 callback을 지원하는 경우에만 같은 positive assertion을 적용한다.
+- Prisma 7은 driver adapter lane, Prisma 6은 driver adapter와 native engine lane을 함께 실행한다.
+- CI/release는 검증 버전 6.19.3과 7.9.1을 고정해 matrix를 실행하며, release publish도 두 lane의 성공을 요구한다.
+
+이 결과는 최초 문서의 “현재 leak 확인”이 아니라 “production claim을 뒷받침할 matrix 부재”였던 공백을 닫는다. 다만 transparent mode의 Prisma 내부 API 의존 위험과 managed pooler별 구성 차이는 별도 잔여 위험이다.
 
 ### 4.3 Cross-package integration kit: ecosystem 수준 신규 기능
 
@@ -269,7 +317,7 @@ ignore | warn | throw
 - runtime PostgreSQL dependency: [`package.json`](../package.json)
 - 사용자 계약: [`README.md`](../README.md#cli)
 
-현재 명령은 invocation당 한 테이블을 명시적으로 감사한다. schema/manifest 전체를 한 번에 순회하는 batch mode, extra restrictive policy drift, domain NOT NULL/identity column, partial/INCLUDE index의 더 엄격한 분류는 비차단 후속이다. PgBouncer 물리 connection 재사용 검증도 아래 별도 P0/P1 matrix 범위이며 이 doctor 완료로 보장한다고 해석하면 안 된다.
+현재 명령은 invocation당 한 테이블을 명시적으로 감사한다. schema/manifest 전체를 한 번에 순회하는 batch mode, extra restrictive policy drift, domain NOT NULL/identity column, partial/INCLUDE index의 더 엄격한 분류는 비차단 후속이다. PgBouncer 물리 connection 재사용은 별도 P0/P1 matrix에서 검증했으며, `doctor` 자체가 pool 상태를 진단한다고 해석하면 안 된다.
 
 #### 구현 전 확인한 공백
 
@@ -293,7 +341,7 @@ ignore | warn | throw
 - policy 이름 검사: 같은 파일 136행 이후
 - setting key 검사: 같은 파일 165행 이후
 
-구현 전에는 다음 상태를 검증하지 못했다. 현재는 위 `doctor`가 PgBouncer 재사용 항목을 제외한 P0 범위를 담당한다.
+구현 전에는 다음 상태를 검증하지 못했다. 현재는 위 `doctor`가 catalog/active-probe P0 범위를 담당하고, 마지막 PgBouncer 항목은 별도 matrix가 담당한다.
 
 - SQL이 운영 DB에 실제 적용되었는지
 - `pg_class.relrowsecurity`, `relforcerowsecurity`
@@ -306,7 +354,7 @@ ignore | warn | throw
 - no-context, tenant A/B active probe가 fail-closed인지
 - PgBouncer connection 재사용 뒤 context가 남는지
 
-초기 권고는 catalog audit와 active behavior probe를 구분하고 Nestarc의 DB setting key, application role, missing-context semantics까지 검사하는 것이었다. 이 범위는 구현되었다. `tenancyTransaction()` 경로 및 pool reuse 검증은 doctor가 과도한 보증을 주장하지 않도록 별도의 transaction/PgBouncer matrix로 남겼다.
+초기 권고는 catalog audit와 active behavior probe를 구분하고 Nestarc의 DB setting key, application role, missing-context semantics까지 검사하는 것이었다. 이 범위는 구현되었다. `tenancyTransaction()` 경로 및 pool reuse는 `doctor`가 과도한 보증을 주장하지 않도록 분리했고, 별도의 transaction/PgBouncer matrix에서 완료했다.
 
 #### 해결된 E2E 이름/fixture 불일치
 
@@ -405,20 +453,21 @@ TypeORM·Drizzle·MikroORM은 실제 구현이 아니라 roadmap/research에만 
 4. ✅ no-context 및 tenant A/B active probe를 추가했다.
 5. ✅ human-readable/JSON 출력과 안정적인 exit code `0/1/2`를 정의했다.
 
-### P0/P1 — PgBouncer matrix
+### P0/P1 — PgBouncer matrix ✅ 완료 (2026-08-23)
 
-1. 재현 가능한 PgBouncer Compose profile을 만든다.
-2. transaction mode를 최소 지원 계약으로 정한다.
-3. pool size 1, tenant A → B → no-context를 필수 보안 시나리오로 둔다.
-4. commit/rollback/error/timeout/동시성을 검증한다.
-5. 지원 Prisma major별 실DB lane을 운영한다.
+1. ✅ 재현 가능한 PgBouncer Compose profile을 만들고 PostgreSQL/PgBouncer image를 고정했다.
+2. ✅ transaction mode를 최소 지원 계약으로 정하고 session mode negative contract를 추가했다.
+3. ✅ pool size 1, tenant A → B → no-context를 동일 물리 backend에서 검증했다.
+4. ✅ commit/rollback/DB error/timeout/동시성, pool size 2 교체·재사용을 검증했다.
+5. ✅ Prisma 6/7 실DB lane을 CI와 release gate에 추가했다.
 
 ### P1 — transaction API 대표 경로 정리
 
-1. `tenancyTransaction()`을 canonical API로 문서화한다.
+1. ✅ `tenancyTransaction()`을 canonical/권장 API로 문서화하고 Prisma 6/7 PgBouncer helper lane을 추가했다.
 2. `maxWait` 및 필요한 public transaction option 지원 여부를 결정한다.
-3. 실제 rollback/failure/custom key/isolation E2E를 추가한다.
-4. transparent internal mode의 fail-fast contract 또는 deprecation 방향을 결정한다.
+3. ✅ callback error·DB error rollback과 timeout cleanup 실DB E2E를 추가했다.
+4. `set_config` 실패·transaction 시작 실패·custom key·isolation level 실DB E2E를 추가한다.
+5. transparent internal mode의 fail-fast contract 또는 deprecation 방향을 결정한다.
 
 ### P1 — non-HTTP missing-context diagnostics
 
@@ -445,13 +494,13 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 1. 이 문서를 먼저 읽는다.
 2. `git status --short`, `git log -1 --oneline`, `package.json` version을 확인한다.
 3. 기준 커밋 `2fe5288` 이후 transaction, CLI, E2E, CI 변경 여부를 diff한다.
-4. 구현 요청이 아니라 재검증 요청이면 먼저 전체 unit/build/lint/E2E를 다시 실행한다.
+4. 구현 요청이 아니라 재검증 요청이면 전체 unit/build/lint/direct E2E와 Prisma 6/7 PgBouncer E2E를 다시 실행한다.
 5. 시장 판단이 필요하면 npm 수치와 Prisma/Yates/UseBetter 상태를 다시 조회한다.
-6. 다음 구현 작업은 PgBouncer matrix 또는 transaction API 신뢰성 강화에서 독립 작업 단위를 선택한다.
+6. 다음 구현 작업은 transaction API 신뢰성 강화 또는 non-HTTP missing-context diagnostics에서 독립 작업 단위를 선택한다.
 
 추천 첫 구현 작업:
 
-> PgBouncer transaction mode Compose profile을 만들고, pool size 1에서 tenant A → tenant B → no-context 및 commit/rollback/error cleanup을 실DB E2E로 검증한다.
+> `tenancyTransaction()`의 `maxWait` 지원 여부를 결정하고, custom setting key·isolation level·transaction 시작 실패를 Prisma 6/7 실DB E2E로 검증한다.
 
 ## 8. 세션 재개용 짧은 프롬프트
 
@@ -459,6 +508,7 @@ Prisma/PostgreSQL의 production contract가 안정될 때까지 adapter 구현�
 
 ```text
 docs/tenancy-strategy-validation-2026-08-21.md를 읽고 현재 HEAD와 차이를 확인한 뒤,
-완료된 live DB doctor/RLS P0의 회귀를 보존하면서 P0/P1 PgBouncer matrix의 다음 미완료 작업을 구현해 주세요.
+완료된 live DB doctor/RLS P0와 PgBouncer P0/P1 matrix의 회귀를 보존하면서
+transaction API 신뢰성 또는 non-HTTP missing-context diagnostics의 다음 미완료 작업을 구현해 주세요.
 시장 수치는 스냅샷이므로 구현 판단에 필요할 때만 최신화하세요.
 ```

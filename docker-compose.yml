@@ -1,14 +1,65 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_USER: tenancy
       POSTGRES_PASSWORD: tenancy
       POSTGRES_DB: tenancy_test
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tenancy"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer-transaction:
+    image: edoburu/pgbouncer:v1.25.2-p0@sha256:7d7a27d9e90985cab5cf42256f5c13a3120baa4b055b69df37beb272b89b2340
+    profiles: ["pgbouncer"]
+    ports:
+      - "127.0.0.1:6432:6432"
+    volumes:
+      - ./test/e2e/pgbouncer/transaction.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./test/e2e/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432", "-U", "tenancy", "-d", "pgbouncer"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer-session:
+    image: edoburu/pgbouncer:v1.25.2-p0@sha256:7d7a27d9e90985cab5cf42256f5c13a3120baa4b055b69df37beb272b89b2340
+    profiles: ["pgbouncer"]
+    ports:
+      - "127.0.0.1:6433:6432"
+    volumes:
+      - ./test/e2e/pgbouncer/session.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./test/e2e/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432", "-U", "tenancy", "-d", "pgbouncer"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer-parallel:
+    image: edoburu/pgbouncer:v1.25.2-p0@sha256:7d7a27d9e90985cab5cf42256f5c13a3120baa4b055b69df37beb272b89b2340
+    profiles: ["pgbouncer"]
+    ports:
+      - "127.0.0.1:6434:6432"
+    volumes:
+      - ./test/e2e/pgbouncer/parallel.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./test/e2e/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "6432", "-U", "tenancy", "-d", "pgbouncer"]
       interval: 2s
       timeout: 5s
       retries: 10

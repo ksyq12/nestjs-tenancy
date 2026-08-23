@@ -1,0 +1,29 @@
+// Prisma 6 native-engine client used by the PgBouncer compatibility lane.
+// The primary schema exercises the driver adapter; this schema preserves
+// coverage of Prisma's native query engine for the supported Prisma 6 major.
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated-v6-native"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("APP_DATABASE_URL")
+}
+
+model User {
+  id        Int    @id @default(autoincrement())
+  tenant_id String
+  name      String
+  email     String
+
+  @@map("users")
+}
+
+model Country {
+  id   Int    @id @default(autoincrement())
+  name String
+  code String
+
+  @@map("countries")
+}

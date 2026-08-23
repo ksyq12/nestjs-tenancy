@@ -22,6 +22,9 @@ const PGBOUNCER_ADMIN_URL =
 const PGBOUNCER_SESSION_DATABASE_URL =
   process.env.PGBOUNCER_SESSION_DATABASE_URL ??
   'postgresql://app_user:app_user@localhost:6433/tenancy_test';
+const PGBOUNCER_SESSION_ADMIN_URL =
+  process.env.PGBOUNCER_SESSION_ADMIN_URL ??
+  'postgresql://tenancy:tenancy@localhost:6433/pgbouncer';
 const PARALLEL_APP_DATABASE_URL =
   process.env.PARALLEL_APP_DATABASE_URL ??
   'postgresql://app_user:app_user@localhost:6434/tenancy_test';
@@ -547,7 +550,9 @@ describe('PrismaPg named prepared statements through PgBouncer', () => {
         expect(generatedNames.length).toBeGreaterThan(0);
       }
       if (generatedNames.length > 0) {
-        expect(new Set(generatedNames).size).toBeGreaterThan(0);
+        expect(new Set(generatedNames).size).toBeLessThan(
+          generatedNames.length,
+        );
         expect(results.every((result) => result.preparedCount > 0)).toBe(true);
       }
     } finally {
@@ -621,23 +626,32 @@ describe('parallel transaction-mode pool', () => {
       await admin.end();
     }
 
-    const tenantA = await runTenantProbe(
-      prisma,
-      context,
-      service,
-      TENANT_A,
+    const replacements = await Promise.all([
+      querySlowProbe(prisma),
+      querySlowProbe(prisma),
+    ]);
+    replacements.forEach(expectNoContext);
+    const newPids = new Set(
+      replacements.map((probe) => probe.backend_pid),
     );
+    expect(newPids.size).toBe(2);
+    for (const pid of newPids) {
+      expect(oldPids.has(pid)).toBe(false);
+    }
+
+    const tenantA = await runTenantProbe(prisma, context, service, TENANT_A);
     const noContext = await queryProbe(prisma);
 
     expectTenantResult(tenantA, TENANT_A);
     expectNoContext(noContext);
-    expect(oldPids.has(tenantA.probe.backend_pid)).toBe(false);
-    expect(oldPids.has(noContext.backend_pid)).toBe(false);
+    expect(newPids.has(tenantA.probe.backend_pid)).toBe(true);
+    expect(newPids.has(noContext.backend_pid)).toBe(true);
   });
 });
 
 describe('session-mode negative contract', () => {
   it('pins the only backend until the first logical client disconnects', async () => {
+    const admin = new Client({ connectionString: PGBOUNCER_SESSION_ADMIN_URL });
     const first = new Client({
       connectionString: PGBOUNCER_SESSION_DATABASE_URL,
     });
@@ -646,10 +660,19 @@ describe('session-mode negative contract', () => {
     });
     let firstEnded = false;
 
+    await admin.connect();
     await first.connect();
     await second.connect();
 
     try {
+      const config = await admin.query<{ key: string; value: string }>(
+        'SHOW CONFIG',
+      );
+      const values = new Map(config.rows.map((row) => [row.key, row.value]));
+      expect(values.get('pool_mode')).toBe('session');
+      expect(Number(values.get('default_pool_size'))).toBe(1);
+      expect(Number(values.get('max_db_connections'))).toBe(1);
+
       const firstPid = await first.query<{ backend_pid: number }>(
         'SELECT pg_backend_pid()::int AS backend_pid',
       );
@@ -663,14 +686,23 @@ describe('session-mode negative contract', () => {
           return result;
         });
 
-      const outcome = await Promise.race([
-        secondQuery.then(() => 'completed' as const),
-        new Promise<'waiting'>((resolve) =>
-          setTimeout(() => resolve('waiting'), 200),
-        ),
-      ]);
+      let waitingClients = 0;
+      for (let attempt = 0; attempt < 25 && waitingClients === 0; attempt++) {
+        const pools = await admin.query<{
+          database: string;
+          user: string;
+          cl_waiting: string | number;
+        }>('SHOW POOLS');
+        const applicationPool = pools.rows.find(
+          (row) => row.database === 'tenancy_test' && row.user === 'app_user',
+        );
+        waitingClients = Number(applicationPool?.cl_waiting ?? 0);
+        if (waitingClients === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
 
-      expect(outcome).toBe('waiting');
+      expect(waitingClients).toBeGreaterThan(0);
       expect(secondFinished).toBe(false);
 
       await first.end();
@@ -682,6 +714,7 @@ describe('session-mode negative contract', () => {
     } finally {
       if (!firstEnded) await first.end();
       await second.end();
+      await admin.end();
     }
   });
 });
@@ -758,21 +791,12 @@ describePrisma6Native('Prisma 6 native-engine PgBouncer lane', () => {
     expect(noContext.backend_pid).toBe(transactionProbe?.backend_pid);
   });
 
-  it('checks transparent interactive transactions when internals are compatible', async () => {
-    let extended: any;
-
-    try {
-      extended = prisma.$extends(
-        createPrismaTenancyExtension(service, {
-          interactiveTransactionSupport: true,
-        }),
-      );
-    } catch (error) {
-      expect(error).toMatchObject({
-        message: expect.stringMatching(/_createItxClient.*not available/i),
-      });
-      return;
-    }
+  it('keeps transparent interactive transactions isolated', async () => {
+    const extended = prisma.$extends(
+      createPrismaTenancyExtension(service, {
+        interactiveTransactionSupport: true,
+      }),
+    );
 
     const runTransparent = (tenantId: string): Promise<TenantResult> =>
       context.run(tenantId, () =>

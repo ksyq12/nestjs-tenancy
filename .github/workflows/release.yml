@@ -50,8 +50,28 @@ jobs:
           DATABASE_URL: postgresql://tenancy:tenancy@localhost:5433/tenancy_test
           APP_DATABASE_URL: postgresql://app_user:app_user@localhost:5433/tenancy_test
 
+  pgbouncer-e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        prisma: ['6.19.3', '7.9.1']
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - name: Install Prisma ${{ matrix.prisma }} E2E runtime
+        run: npm install prisma@${{ matrix.prisma }} @prisma/client@${{ matrix.prisma }} @prisma/adapter-pg@${{ matrix.prisma }} --no-save
+      - run: npm run test:e2e:pgbouncer
+
   publish:
-    needs: [test, e2e]
+    needs: [test, e2e, pgbouncer-e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read

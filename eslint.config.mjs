@@ -14,6 +14,12 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ['dist/', 'coverage/', 'test/e2e/generated/', 'node_modules/'],
+    ignores: [
+      'dist/',
+      'coverage/',
+      'test/e2e/generated/',
+      'test/e2e/generated-v6-native/',
+      'node_modules/',
+    ],
   },
 );
