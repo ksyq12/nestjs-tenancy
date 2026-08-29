@@ -5,6 +5,7 @@ import {
   quoteSqlIdentifier,
   quoteSqlLiteral,
 } from '../../postgres-safety';
+import { generateRelationNames } from '../generated-name';
 
 export interface SetupSqlOptions {
   models: ParsedModel[];
@@ -18,10 +19,6 @@ function qualifiedTableName(model: ParsedModel): string {
     return `${quoteSqlIdentifier(model.schemaName)}.${quoteSqlIdentifier(model.tableName)}`;
   }
   return `${quoteSqlIdentifier('public')}.${quoteSqlIdentifier(model.tableName)}`;
-}
-
-function safeIdentifier(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_]/g, '_');
 }
 
 function sqlCommentText(value: string): string {
@@ -102,6 +99,14 @@ export function generateSetupSql(options: SetupSqlOptions): string {
   const sharedSet = new Set(sharedModels);
   const tenantColumn = quoteSqlIdentifier(tenantIdField);
   const settingKeyLiteral = quoteSqlLiteral(dbSettingKey);
+  const generatedNames = models
+    .filter((model) => !sharedSet.has(model.modelName))
+    .map((model) => generateRelationNames({
+      schemaName: model.schemaName,
+      tableName: model.tableName,
+      tenantIdField,
+    }));
+  let generatedNameIndex = 0;
 
   // Collect unique schemas for GRANT USAGE statements
   const schemas = new Set<string>(['public']);
@@ -119,6 +124,8 @@ export function generateSetupSql(options: SetupSqlOptions): string {
     '-- Use a fail-fast client; with psql, use -X -v ON_ERROR_STOP=1 and not ON_ERROR_ROLLBACK=on.',
     '-- On error, issue ROLLBACK or close the session before running any other statement.',
     '-- Existing policies with generated names are preserved during reapply so drift is not overwritten.',
+    '-- Existing short names stay unchanged for canonical lowercase ASCII inputs except legacy explicit public_ names.',
+    '-- Lossy, case-folded, or overlong names use a stable hash suffix; explicit and implicit public schemas share one identity.',
     '-- Review applied policy drift with `tenancy doctor`.',
     '-- For atomic replacement, use a temporary reviewed copy with an explicit DROP POLICY after BEGIN.',
     '',
@@ -161,17 +168,14 @@ export function generateSetupSql(options: SetupSqlOptions): string {
       continue;
     }
 
-    // Include schema in policy name to avoid cross-schema collisions
-    const schemaPrefix = model.schemaName ? `${model.schemaName}_` : '';
-    const safeName = safeIdentifier(`${schemaPrefix}${model.tableName}`);
-    const safeTenantField = safeIdentifier(tenantIdField);
-    const isolationPolicy = `tenant_isolation_${safeName}`;
-    const insertPolicy = `tenant_insert_${safeName}`;
+    const names = generatedNames[generatedNameIndex++];
+    const isolationPolicy = names.isolationPolicy;
+    const insertPolicy = names.insertPolicy;
     lines.push(`-- ${sqlCommentText(model.modelName)}`);
     lines.push(`ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY;`);
     lines.push(`ALTER TABLE ${tableName} FORCE ROW LEVEL SECURITY;`);
     lines.push(
-      `CREATE INDEX IF NOT EXISTS tenancy_${safeName}_${safeTenantField}_idx ON ${tableName} (${tenantColumn});`,
+      `CREATE INDEX IF NOT EXISTS ${names.index} ON ${tableName} (${tenantColumn});`,
     );
     lines.push(...createPolicyIfMissing(
       isolationPolicy,

@@ -480,6 +480,46 @@ describe('doctor missing prerequisites and security findings', () => {
 });
 
 describe('doctor policy contract and parser coverage', () => {
+  it('uses hashed policy names exactly for lossy table identifiers', async () => {
+    const policyRows = [
+      insertPolicy({
+        policy_name: 'tenant_insert_audit_logs_4aa2515f122e',
+      }),
+      isolationPolicy({
+        policy_name: 'tenant_isolation_audit_logs_ae80b988a44e',
+      }),
+    ];
+    const exact = createClient({ policies: policyRows });
+    const exactResult = await runDoctor({
+      ...options(),
+      table: 'public.audit-logs',
+    }, { clientFactory: () => exact.client });
+
+    expect(checksById(exactResult)).toEqual(expect.objectContaining({
+      'policy.isolation_exists': 'pass',
+      'policy.insert_exists': 'pass',
+      'policy.no_unexpected_permissive': 'pass',
+    }));
+
+    const wrongCase = createClient({
+      policies: [
+        policyRows[0],
+        isolationPolicy({
+          policy_name: 'TENANT_ISOLATION_AUDIT_LOGS_AE80B988A44E',
+        }),
+      ],
+    });
+    const wrongCaseResult = await runDoctor({
+      ...options(),
+      table: 'public.audit-logs',
+    }, { clientFactory: () => wrongCase.client });
+
+    expect(checksById(wrongCaseResult)).toEqual(expect.objectContaining({
+      'policy.isolation_exists': 'fail',
+      'policy.no_unexpected_permissive': 'fail',
+    }));
+  });
+
   it('reports both generated policies missing and ignores a non-permissive extra policy', async () => {
     const mock = createClient({
       policies: [{

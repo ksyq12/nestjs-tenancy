@@ -132,8 +132,8 @@ describe('generated setup SQL', () => {
       `, [SCHEMA_NAME, TABLE_NAME]);
       expect(policies.rows).toEqual(initialPolicies.rows);
       expect(policies.rows.map(({ policy_name }) => policy_name)).toEqual([
-        'tenant_insert_tenant__ops_ledger_tenancy_policy__archive',
-        'tenant_isolation_tenant__ops_ledger_tenancy_policy__archive',
+        'tenant_insert_tenant__ops_ledger_tenancy_policy__a_4e1d1fe89a31',
+        'tenant_isolation_tenant__ops_ledger_tenancy_policy_919ed50e5791',
       ]);
 
       const index = await client.query<{ has_tenant_index: boolean }>(`
@@ -347,6 +347,112 @@ describe('generated setup SQL', () => {
       try {
         await client.query('ROLLBACK');
         await client.query(`DROP SCHEMA IF EXISTS generated_m16a CASCADE`);
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
+  it('applies normalization collisions and long names without generated-name collisions', async () => {
+    const schemaName = 'generated_m16b';
+    const schemaSql = quoteSqlIdentifier(schemaName);
+    const commonPrefix = 'a'.repeat(58);
+    const models = [
+      { modelName: 'DashedAuditLog', schemaName, tableName: 'audit-logs' },
+      { modelName: 'UnderscoredAuditLog', schemaName, tableName: 'audit_logs' },
+      { modelName: 'LongAccountA', schemaName, tableName: `${commonPrefix}a` },
+      { modelName: 'LongAccountB', schemaName, tableName: `${commonPrefix}b` },
+    ];
+    const client = new Client({ connectionString: ADMIN_URL });
+    await client.connect();
+
+    try {
+      await client.query(`DROP SCHEMA IF EXISTS ${schemaSql} CASCADE`);
+      await client.query(`CREATE SCHEMA ${schemaSql}`);
+      for (const model of models) {
+        await client.query(`
+          CREATE TABLE ${schemaSql}.${quoteSqlIdentifier(model.tableName)} (
+            id integer,
+            tenant_id text NOT NULL
+          )
+        `);
+      }
+
+      const sql = generateSetupSql({
+        models,
+        dbSettingKey: 'app.generated_tenant',
+        sharedModels: [],
+        tenantIdField: 'tenant_id',
+      });
+      await client.query(sql);
+      await client.query(sql);
+
+      const generatedObjects = await client.query<{
+        table_name: string;
+        index_names: string[];
+        policy_names: string[];
+      }>(`
+        SELECT
+          c.relname AS table_name,
+          COALESCE(
+            pg_catalog.array_agg(DISTINCT index_class.relname::text)
+              FILTER (WHERE index_class.oid IS NOT NULL),
+            ARRAY[]::text[]
+          ) AS index_names,
+          COALESCE(
+            pg_catalog.array_agg(DISTINCT p.polname::text)
+              FILTER (WHERE p.oid IS NOT NULL),
+            ARRAY[]::text[]
+          ) AS policy_names
+        FROM pg_catalog.pg_class AS c
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        LEFT JOIN pg_catalog.pg_index AS i ON i.indrelid = c.oid
+        LEFT JOIN pg_catalog.pg_class AS index_class ON index_class.oid = i.indexrelid
+        LEFT JOIN pg_catalog.pg_policy AS p ON p.polrelid = c.oid
+        WHERE n.nspname = $1
+          AND c.relname = ANY($2::text[])
+          AND c.relkind = 'r'
+        GROUP BY c.relname
+        ORDER BY c.relname
+      `, [schemaName, models.map((model) => model.tableName)]);
+
+      expect(generatedObjects.rows).toHaveLength(models.length);
+      expect(generatedObjects.rows.every(
+        ({ index_names, policy_names }) =>
+          index_names.length === 1 && policy_names.length === 2,
+      )).toBe(true);
+
+      const indexNames = generatedObjects.rows.flatMap(({ index_names }) => index_names);
+      const policyNames = generatedObjects.rows.flatMap(({ policy_names }) => policy_names);
+      expect(new Set(indexNames).size).toBe(models.length);
+      expect(new Set(policyNames).size).toBe(models.length * 2);
+      expect([...indexNames, ...policyNames].every(
+        (identifier) => Buffer.byteLength(identifier, 'utf8') <= 63,
+      )).toBe(true);
+
+      for (const model of models) {
+        const doctor = await runDoctor({
+          url: APP_URL,
+          table: `${schemaName}.${model.tableName}`,
+          role: APP_ROLE,
+          dbSettingKey: 'app.generated_tenant',
+        });
+        expect(doctor.status).toBe('healthy');
+        expect(doctor.checks).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            id: 'policy.isolation_exists',
+            status: 'pass',
+          }),
+          expect.objectContaining({
+            id: 'policy.insert_exists',
+            status: 'pass',
+          }),
+        ]));
+      }
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+        await client.query(`DROP SCHEMA IF EXISTS ${schemaSql} CASCADE`);
       } finally {
         await client.end();
       }

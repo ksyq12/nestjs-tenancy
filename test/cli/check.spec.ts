@@ -235,6 +235,37 @@ model LedgerEntry {
     expect(result.extraPolicies).toHaveLength(0);
   });
 
+  it('should reject legacy lossy names inside a canonical generated section', () => {
+    writeSchema(`
+model AuditLog {
+  id String @id
+  tenant_id String
+  @@map("audit-logs")
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'AuditLog', tableName: 'audit-logs' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    })
+      .split('tenancy_audit_logs_tenant_id_idx_07148afa054f')
+      .join('tenancy_audit_logs_tenant_id_idx')
+      .split('tenant_isolation_audit_logs_ae80b988a44e')
+      .join('tenant_isolation_audit_logs')
+      .split('tenant_insert_audit_logs_4aa2515f122e')
+      .join('tenant_insert_audit_logs');
+    writeSql(sql);
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining('missing or invalid tenant_isolation policy'),
+      expect.stringContaining('missing or invalid tenant_insert policy'),
+      expect.stringContaining('missing tenant index'),
+    ]));
+  });
+
   it('should ignore user-managed SQL outside generated boundaries', () => {
     writeSchema(`
 model User {
@@ -774,8 +805,8 @@ model User {
       tenantIdField: 'tenant_id',
     });
     writeSql(sql.replace(
-      "'tenant_isolation_user'::pg_catalog.name",
-      '$policy$tenant_isolation_user$policy$::pg_catalog.name',
+      "'tenant_isolation_user_940d88379add'::pg_catalog.name",
+      '$policy$tenant_isolation_user_940d88379add$policy$::pg_catalog.name',
     ));
 
     const result = runCheck({ cwd: tmpDir });
@@ -833,8 +864,8 @@ model User {
         `WHERE n.nspname = $tenancy_identifier$${overlongSchema}$tenancy_identifier$`,
       )
       .replace(
-        'CREATE POLICY tenant_isolation_User ON "public"."User"',
-        `CREATE POLICY tenant_isolation_User ON "${overlongSchema}"."User"`,
+        'CREATE POLICY tenant_isolation_User_940d88379add ON "public"."User"',
+        `CREATE POLICY tenant_isolation_User_940d88379add ON "${overlongSchema}"."User"`,
       ));
 
     const result = runCheck({ cwd: tmpDir });

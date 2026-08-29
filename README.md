@@ -1232,6 +1232,25 @@ transaction. Do not keep that state-reversing statement in the canonical
 temporary copy with the fail-fast contract makes the drop and recreation atomic;
 a separate autocommitted drop can leave a policy gap if the later setup fails.
 
+Generated index and policy names retain the legacy readable form only when the
+resolved schema, table, and (for indexes) tenant-column components are lowercase
+ASCII letters, digits, or underscores and the complete name fits PostgreSQL's
+63-byte limit. Inputs that would lose information through punctuation, Unicode,
+case folding, or truncation receive a deterministic 12-hex SHA-256 suffix; the
+readable prefix is shortened so the complete identifier remains at most 63
+bytes. Explicit and implicit `public` schemas use the same identity.
+
+When upgrading a setup generated for a non-canonical or overlong name, or one
+that explicitly declared `@@schema("public")` and therefore used the old
+`public_` name prefix, compare the live legacy objects with the newly generated
+names before applying.
+Do not blindly keep both policy sets: a drifted legacy permissive policy can
+broaden access even when the new policy is correct. Use a reviewed transaction
+to rename or explicitly replace the legacy policies and indexes, then run
+`tenancy check` on the canonical file and `tenancy doctor` on every affected
+table. Existing lowercase ASCII short names remain unchanged except that the
+old explicit-`public_` form now shares the implicit-public identity.
+
 Preview without writing files:
 
 ```bash

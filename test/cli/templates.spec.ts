@@ -9,6 +9,12 @@ function formatDiagnostic(diagnostic: ts.Diagnostic): string {
   return ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
 }
 
+function generatedIdentifiers(sql: string): string[] {
+  return [...sql.matchAll(
+    /\bCREATE (?:INDEX IF NOT EXISTS|POLICY) ([A-Za-z_][A-Za-z0-9_]*)/g,
+  )].map((match) => match[1]);
+}
+
 describe('generateSetupSql', () => {
   const baseOptions = {
     models: [],
@@ -72,10 +78,16 @@ describe('generateSetupSql', () => {
     const sql = generateSetupSql(options);
     expect(sql).toContain('ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY;');
     expect(sql).toContain('ALTER TABLE "public"."User" FORCE ROW LEVEL SECURITY;');
-    expect(sql).toContain('CREATE POLICY tenant_isolation_User ON "public"."User"');
+    expect(sql).toContain(
+      'CREATE POLICY tenant_isolation_User_940d88379add ON "public"."User"',
+    );
     expect(sql).toContain("current_setting('app.current_tenant', true)::text");
-    expect(sql).toContain('CREATE POLICY tenant_insert_User ON "public"."User"');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "public"."User" ("tenant_id");');
+    expect(sql).toContain(
+      'CREATE POLICY tenant_insert_User_b8b33f29d481 ON "public"."User"',
+    );
+    expect(sql).toContain(
+      'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx_44e3041c39d1 ON "public"."User" ("tenant_id");',
+    );
     expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."User" TO app_user;');
   });
 
@@ -93,10 +105,10 @@ describe('generateSetupSql', () => {
       'c.relname = $tenancy_identifier$User$tenancy_identifier$',
     );
     expect(sql).toContain(
-      "p.polname = 'tenant_isolation_user'::pg_catalog.name",
+      "p.polname = 'tenant_isolation_user_940d88379add'::pg_catalog.name",
     );
     expect(sql).toContain(
-      "p.polname = 'tenant_insert_user'::pg_catalog.name",
+      "p.polname = 'tenant_insert_user_b8b33f29d481'::pg_catalog.name",
     );
     expect(sql).not.toMatch(/^DROP POLICY/m);
     expect(sql).toMatch(/existing policies.+preserved/i);
@@ -256,10 +268,144 @@ describe('generateSetupSql', () => {
     const sql = generateSetupSql(options);
     expect(sql).toContain('ALTER TABLE "public"."audit-logs" ENABLE ROW LEVEL SECURITY;');
     expect(sql).toContain('ALTER TABLE "public"."audit-logs" FORCE ROW LEVEL SECURITY;');
-    expect(sql).toContain('CREATE POLICY tenant_isolation_audit_logs ON "public"."audit-logs"');
-    expect(sql).toContain('CREATE POLICY tenant_insert_audit_logs ON "public"."audit-logs"');
+    expect(sql).toContain(
+      'CREATE POLICY tenant_isolation_audit_logs_ae80b988a44e ON "public"."audit-logs"',
+    );
+    expect(sql).toContain(
+      'CREATE POLICY tenant_insert_audit_logs_4aa2515f122e ON "public"."audit-logs"',
+    );
     expect(sql).not.toContain('tenant_isolation_audit-logs');
     expect(sql).not.toContain('tenant_insert_audit-logs');
+  });
+
+  it('should deterministically disambiguate generated identifiers after normalization', () => {
+    const options = {
+      ...baseOptions,
+      models: [
+        { modelName: 'DashedAuditLog', tableName: 'audit-logs' },
+        { modelName: 'UnderscoredAuditLog', tableName: 'audit_logs' },
+      ],
+    };
+
+    const identifiers = generatedIdentifiers(generateSetupSql(options));
+    expect(identifiers).toHaveLength(6);
+    expect(new Set(identifiers).size).toBe(6);
+    expect(identifiers).toEqual(
+      generatedIdentifiers(generateSetupSql(options)),
+    );
+    expect(identifiers).toEqual([
+      'tenancy_audit_logs_tenant_id_idx_07148afa054f',
+      'tenant_isolation_audit_logs_ae80b988a44e',
+      'tenant_insert_audit_logs_4aa2515f122e',
+      'tenancy_audit_logs_tenant_id_idx',
+      'tenant_isolation_audit_logs',
+      'tenant_insert_audit_logs',
+    ]);
+    expect(generatedIdentifiers(generateSetupSql({
+      ...options,
+      models: [...options.models].reverse(),
+    })).sort()).toEqual([...identifiers].sort());
+    expect(identifiers.slice(3)).toEqual(generatedIdentifiers(
+      generateSetupSql({
+        ...options,
+        models: [options.models[1]],
+      }),
+    ));
+  });
+
+  it('should keep long generated identifiers unique and within 63 UTF-8 bytes', () => {
+    const commonPrefix = 'a'.repeat(58);
+    const options = {
+      ...baseOptions,
+      models: [
+        { modelName: 'LongAccountA', tableName: `${commonPrefix}a` },
+        { modelName: 'LongAccountB', tableName: `${commonPrefix}b` },
+      ],
+    };
+
+    const identifiers = generatedIdentifiers(generateSetupSql(options));
+    expect(identifiers).toHaveLength(6);
+    expect(new Set(identifiers).size).toBe(6);
+    expect(identifiers.every(
+      (identifier) => Buffer.byteLength(identifier, 'utf8') <= 63,
+    )).toBe(true);
+    expect(identifiers[0]).toBe(
+      'tenancy_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_7e7d6f293149',
+    );
+  });
+
+  it('should disambiguate names that PostgreSQL folds to the same case', () => {
+    const identifiers = generatedIdentifiers(generateSetupSql({
+      ...baseOptions,
+      models: [
+        { modelName: 'UpperUser', tableName: 'User' },
+        { modelName: 'LowerUser', tableName: 'user' },
+      ],
+    }));
+
+    expect(identifiers).toHaveLength(6);
+    expect(new Set(identifiers.map((identifier) => identifier.toLowerCase())).size)
+      .toBe(6);
+    expect(identifiers.slice(0, 3).every(
+      (identifier) => /_[0-9a-f]{12}$/.test(identifier),
+    )).toBe(true);
+    expect(identifiers.slice(3)).toEqual([
+      'tenancy_user_tenant_id_idx',
+      'tenant_isolation_user',
+      'tenant_insert_user',
+    ]);
+  });
+
+  it('should derive the index name from the raw tenant column identity', () => {
+    const lossyNames = generatedIdentifiers(generateSetupSql({
+      ...baseOptions,
+      models: [{ modelName: 'Account', tableName: 'accounts' }],
+      tenantIdField: 'tenant-id',
+    }));
+    const canonicalNames = generatedIdentifiers(generateSetupSql({
+      ...baseOptions,
+      models: [{ modelName: 'Account', tableName: 'accounts' }],
+      tenantIdField: 'tenant_id',
+    }));
+
+    expect(lossyNames[0]).toMatch(
+      /^tenancy_accounts_tenant_id_idx_[0-9a-f]{12}$/,
+    );
+    expect(lossyNames[0]).not.toBe(canonicalNames[0]);
+    expect(lossyNames.slice(1)).toEqual(canonicalNames.slice(1));
+  });
+
+  it('should disambiguate Unicode identifiers that normalize to underscores', () => {
+    const identifiers = generatedIdentifiers(generateSetupSql({
+      ...baseOptions,
+      models: [
+        { modelName: 'KoreanA', tableName: '가' },
+        { modelName: 'KoreanB', tableName: '나' },
+      ],
+    }));
+
+    expect(identifiers).toHaveLength(6);
+    expect(new Set(identifiers.map((identifier) => identifier.toLowerCase())).size)
+      .toBe(6);
+    expect(identifiers.every((identifier) => /_[0-9a-f]{12}$/.test(identifier)))
+      .toBe(true);
+  });
+
+  it('should canonicalize explicit and implicit public schema names identically', () => {
+    const implicit = generatedIdentifiers(generateSetupSql({
+      ...baseOptions,
+      models: [{ modelName: 'Account', tableName: 'accounts' }],
+    }));
+    const explicit = generatedIdentifiers(generateSetupSql({
+      ...baseOptions,
+      models: [{
+        modelName: 'Account',
+        schemaName: 'public',
+        tableName: 'accounts',
+      }],
+    }));
+
+    expect(explicit).toEqual(implicit);
   });
 
   describe('@@schema support', () => {

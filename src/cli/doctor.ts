@@ -4,6 +4,10 @@ import {
   quoteSqlIdentifier,
 } from '../postgres-safety';
 import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
+import {
+  generateRelationNames,
+  postgresCatalogIdentifier,
+} from './generated-name';
 
 export const DOCTOR_SCHEMA_VERSION = 1 as const;
 
@@ -729,17 +733,23 @@ function addPolicyChecks(
   options: ValidatedDoctorOptions,
   maxIdentifierLength: number,
 ): void {
-  const suffix = policySuffix(options.schema, options.table);
-  const isolationName = truncateIdentifier(
-    `tenant_isolation_${suffix}`.toLowerCase(),
+  const names = generateRelationNames({
+    schemaName: options.schema,
+    tableName: options.table,
+    tenantIdField: options.tenantColumn,
+  });
+  const isolationName = postgresCatalogIdentifier(
+    names.isolationPolicy,
     maxIdentifierLength,
   );
-  const insertName = truncateIdentifier(
-    `tenant_insert_${suffix}`.toLowerCase(),
+  const insertName = postgresCatalogIdentifier(
+    names.insertPolicy,
     maxIdentifierLength,
   );
-  const isolation = policies.find((policy) => policy.policy_name.toLowerCase() === isolationName);
-  const insert = policies.find((policy) => policy.policy_name.toLowerCase() === insertName);
+  const isolation = policies.find((policy) =>
+    policy.policy_name === isolationName
+  );
+  const insert = policies.find((policy) => policy.policy_name === insertName);
 
   addCheck(checks, {
     id: 'policy.isolation_exists',
@@ -802,7 +812,7 @@ function addPolicyChecks(
   }
 
   const unexpectedPermissive = policies.filter((policy) => {
-    const name = policy.policy_name.toLowerCase();
+    const name = policy.policy_name;
     return policy.permissive &&
       name !== isolationName &&
       name !== insertName;
@@ -1149,16 +1159,6 @@ function normalizePolicyRoles(roles: unknown): string[] {
     return roles.slice(1, -1).split(',').filter(Boolean).map((role) => role.replace(/^"|"$/g, ''));
   }
   return [roles];
-}
-
-function policySuffix(schema: string, table: string): string {
-  const value = schema === 'public' ? table : `${schema}_${table}`;
-  return value.replace(/[^a-zA-Z0-9_]/g, '_');
-}
-
-function truncateIdentifier(identifier: string, maxLength: number): string {
-  const safeLength = Number.isInteger(maxLength) && maxLength > 0 ? maxLength : 63;
-  return identifier.slice(0, safeLength);
 }
 
 function quoteQualifiedIdentifier(schema: string, table: string): string {

@@ -7,6 +7,7 @@ import {
   quoteSqlLiteral,
 } from '../postgres-safety';
 import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
+import { generateRelationNames } from './generated-name';
 
 interface CheckOptions {
   cwd?: string;
@@ -611,6 +612,19 @@ export function runCheck(options?: CheckOptions): CheckResult {
       return [canonicalTableName(displayName), displayName] as const;
     }),
   );
+  const expectedGeneratedNames = new Map(
+    models.map((model) => {
+      const displayName = qualifiedName(model);
+      return [
+        canonicalTableName(displayName),
+        generateRelationNames({
+          schemaName: model.schemaName,
+          tableName: model.tableName,
+          tenantIdField,
+        }),
+      ] as const;
+    }),
+  );
   const expectedTables = new Set(expectedTableNames.keys());
   const allModelTables = new Set(expectedTables);
   const expectedSchemaIdentifiers = new Set([
@@ -853,8 +867,12 @@ export function runCheck(options?: CheckOptions): CheckResult {
     const tenantPredicate =
       `${tenantColumnPattern}\\s*=\\s*current_setting\\s*\\(\\s*${expectedKeyPattern}\\s*,\\s*true\\s*\\)\\s*::\\s*text`;
     const policyStatements = statementsForAnalysis;
+    const expectedNames = expectedGeneratedNames.get(canonicalName);
+    const isolationNamePattern = hasGeneratedBoundaries && expectedNames
+      ? escapeRegExp(expectedNames.isolationPolicy)
+      : 'tenant_isolation_\\S+';
     const isolationRegex = new RegExp(
-      `^CREATE POLICY\\s+tenant_isolation_\\S+\\s+ON\\s+${escapedTable}\\s+USING\\s*\\(\\s*${tenantPredicate}\\s*\\)$`,
+      `^CREATE POLICY\\s+${isolationNamePattern}\\s+ON\\s+${escapedTable}\\s+USING\\s*\\(\\s*${tenantPredicate}\\s*\\)$`,
     );
     const matchingIsolationPolicies = policyStatements.filter((statement) =>
       isolationRegex.test(statement),
@@ -867,8 +885,11 @@ export function runCheck(options?: CheckOptions): CheckResult {
     }
 
     // Check insert policy
+    const insertNamePattern = hasGeneratedBoundaries && expectedNames
+      ? escapeRegExp(expectedNames.insertPolicy)
+      : 'tenant_insert_\\S+';
     const insertRegex = new RegExp(
-      `^CREATE POLICY\\s+tenant_insert_\\S+\\s+ON\\s+${escapedTable}\\s+FOR\\s+INSERT\\s+WITH\\s+CHECK\\s*\\(\\s*${tenantPredicate}\\s*\\)$`,
+      `^CREATE POLICY\\s+${insertNamePattern}\\s+ON\\s+${escapedTable}\\s+FOR\\s+INSERT\\s+WITH\\s+CHECK\\s*\\(\\s*${tenantPredicate}\\s*\\)$`,
     );
     const matchingInsertPolicies = policyStatements.filter((statement) =>
       insertRegex.test(statement),
@@ -907,8 +928,11 @@ export function runCheck(options?: CheckOptions): CheckResult {
 
     // Check tenant column index. RLS policies are implicit filters, so tenant
     // scoped tables should index the policy column to avoid full table scans.
+    const indexNamePattern = hasGeneratedBoundaries && expectedNames
+      ? escapeRegExp(expectedNames.index)
+      : '\\S+';
     const tenantIndexRegex = new RegExp(
-      `^CREATE\\s+(?:UNIQUE\\s+)?INDEX(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+\\S+\\s+ON\\s+${escapedTable}\\s+(?:USING\\s+\\w+\\s+)?\\([^)]*${tenantColumnPattern}[^)]*\\)$`,
+      `^CREATE\\s+(?:UNIQUE\\s+)?INDEX(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s+${indexNamePattern}\\s+ON\\s+${escapedTable}\\s+(?:USING\\s+\\w+\\s+)?\\([^)]*${tenantColumnPattern}[^)]*\\)$`,
     );
     if (!statementsForAnalysis.some((statement) => tenantIndexRegex.test(statement))) {
       warnings.push(`${table}: missing tenant index on ${tenantIdField}`);
