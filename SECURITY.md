@@ -2,22 +2,39 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.10.x  | ✅        |
-| 0.9.x   | ✅        |
-| 0.8.x   | ✅        |
-| < 0.8   | ❌        |
+`@nestarc/tenancy` is pre-1.0. Security fixes are provided for the latest
+published minor release line only; publishing a new minor normally ends
+security support for the previous minor. Always use the newest patch in the
+supported line.
+
+| Package release line  | Security fixes     |
+|-----------------------|--------------------|
+| 0.15.x                | ✅                 |
+| 0.14.x and earlier    | ❌ Upgrade to 0.15.x |
+
+Package security support and upstream runtime maintenance are separate. The
+current 0.15.x package still declares Node.js >= 20.19.0 and checks Node.js
+20.19.0, 22, and 24 in CI. However, Node.js 20 is upstream EOL; production
+deployments should use a maintained Node.js 22 or 24 release. A future minor is
+planned to raise the package floor to Node.js 22.13.0, but that change has not been
+made yet. See the README's [support and compatibility](./README.md#support-and-compatibility)
+section for the declared NestJS and Prisma ranges and the narrower set of
+combinations exercised by CI.
 
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in `@nestarc/tenancy`, please report it responsibly:
 
-1. **Do not** open a public GitHub issue
-2. Email: **security@nestarc.dev** (or open a [GitHub Security Advisory](https://github.com/nestarc/nestjs-tenancy/security/advisories/new))
-3. Include: description, reproduction steps, affected versions, and potential impact
+1. **Do not** open a public GitHub issue, discussion, or pull request.
+2. Email [security@nestarc.dev](mailto:security@nestarc.dev), the currently
+   supported private intake channel.
+3. Include a description, minimal reproduction steps, affected versions, and
+   potential impact. Do not include production credentials or customer data.
 
-We will acknowledge receipt within 48 hours and aim to release a fix within 7 days for critical issues.
+We aim to acknowledge receipt within 48 hours and to release a fix within 7
+days for critical issues. Remediation and coordinated disclosure timing can
+vary with impact, complexity, and downstream coordination; if the target cannot
+be met, we will provide a status update and the next expected milestone.
 
 ## Security Design
 
@@ -27,3 +44,18 @@ This library handles tenant isolation at the database level via PostgreSQL Row L
 - **Transaction-scoped isolation**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL`, scoped to the batch transaction
 - **Tenant ID validation**: UUID format validation by default, customizable via `validateTenantId`
 - **JWT extractor**: Does **not** verify JWT signatures — requires prior authentication middleware (documented in JSDoc)
+
+## Current Guarantee Boundaries
+
+- Automatic fail-closed enforcement applies to Prisma model operations. Raw
+  Prisma operations such as `$queryRaw` and `$executeRaw` bypass the extension
+  and require `tenancyTransaction()` or an equivalent explicit transaction
+  that performs parameterized `set_config()` and the raw operation through the
+  same transaction client and connection.
+- Inbound tenant restoration is covered for HTTP, Kafka, Bull, and gRPC.
+  WebSocket tenant enforcement/restoration is not currently provided.
+- The verified pooler contract is the repository's pinned PgBouncer transaction
+  mode configuration. Prisma Data Proxy, managed poolers, and production-specific
+  pooler settings remain outside the repository support guarantee. Deployment
+  owners must validate the exact production configuration with equivalent
+  isolation, rollback, reuse, and concurrency scenarios.

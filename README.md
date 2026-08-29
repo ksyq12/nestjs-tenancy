@@ -14,7 +14,7 @@ One line of code. Automatic tenant isolation.
 
 - **RLS-based isolation** — PostgreSQL enforces tenant boundaries at the database level
 - **AsyncLocalStorage** — Zero-overhead request-scoped tenant context (no `REQUEST` scope)
-- **Prisma Client Extensions** — Automatic `set_config()` before every query
+- **Prisma Client Extensions** — Automatic transaction-local `set_config()` for tenant-scoped Prisma model operations
 - **5 built-in extractors** — Header, Subdomain, JWT Claim, Path, Composite (fallback chain)
 - **Lifecycle hooks** — `onTenantResolved` / `onTenantNotFound` for logging, auditing, custom error handling
 - **Auto-inject tenant ID** — Optionally inject `tenant_id` into `create` / `createMany` / `upsert` operations
@@ -71,6 +71,37 @@ Measured extension overhead: **-0.003ms avg (-0.1%)**, **-0.166ms p95** compared
 - NestJS 10 or 11
 - Prisma 7 (recommended) or Prisma 6
 - PostgreSQL (with RLS support). Use a patched minor release: CVE-2024-10976 is fixed in PostgreSQL 17.1, 16.5, 15.9, 14.14, 13.17, and 12.21.
+
+## Support and Compatibility
+
+`@nestarc/tenancy` is pre-1.0. Security fixes are provided for the latest
+published minor release line only; `0.15.x` is the current supported line. See
+the [security policy](./SECURITY.md) for reporting and response targets.
+
+Published compatibility ranges and repository verification are related, but
+they are not the same claim:
+
+| Area | Published contract | Current repository evidence for 0.15.x |
+|------|--------------------|----------------------------------------|
+| Node.js | `>=20.19.0` | Lint, unit/coverage, and build run on 20.19.0, 22, and 24. Database and infrastructure jobs run on 22; publishing runs on 24. |
+| NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | The locked primary graph uses NestJS 11.2.1. A Node 20.19 unit/build compatibility job covers NestJS 10 with Prisma 6, and the strict ecosystem fixture covers exact NestJS 10.4.20 with Prisma 6.19.3 on Node 22. |
+| Prisma | Peer range `^6.0.0 \|\| ^7.0.0` | The locked primary and direct PostgreSQL lanes use Prisma 7.9.1. The PgBouncer matrix uses exact Prisma 6.19.3 and 7.9.1; the ecosystem lane uses exact Prisma 6.19.3. |
+
+The peer ranges permit all four NestJS 10/11 × Prisma 6/7 combinations, but
+the repository does not yet strict-install and independently exercise that full
+cross-product. Exact versions above describe current evidence, not new minimum
+versions. Node.js 20 remains in the 0.15.x package contract and CI for existing
+consumers even though it is [upstream EOL](https://nodejs.org/en/about/previous-releases);
+a future minor is planned to raise the floor to Node.js 22.13.0. Use maintained
+Node.js 22 or 24 releases for production today.
+
+The automatic tenant-isolation guarantee does not currently cover:
+
+- Raw Prisma operations (`$queryRaw` / `$executeRaw`), which bypass the model extension.
+- WebSocket inbound tenant enforcement or context restoration; the supported non-HTTP transports are Kafka, Bull, and gRPC.
+- Prisma Data Proxy, managed poolers, or custom PgBouncer configurations. These remain outside the repository support guarantee; deployment owners must validate their exact configuration with equivalent matrix scenarios.
+
+See [Fail-Closed Mode](#fail-closed-mode), [Inbound Context Restoration](#inbound-context-restoration-interceptor), and the [PgBouncer Support Contract](#pgbouncer-support-contract) for the corresponding operational requirements.
 
 ## Installation
 
@@ -275,7 +306,8 @@ Send requests with the tenant header:
 curl -H "X-Tenant-Id: 550e8400-e29b-41d4-a716-446655440000" http://localhost:3000/users
 ```
 
-All Prisma queries are automatically scoped to that tenant via RLS.
+Prisma model operations executed through the extension are automatically scoped
+to that tenant via RLS. Raw operations are outside this automatic contract.
 
 ## API
 
@@ -590,7 +622,8 @@ TenancyModule.forRoot({
 | Cross-check mismatch | 403 | `Tenant ID mismatch` |
 | `crossCheck.required: true` and no secondary tenant source | 403 | `Cross-check source is required but returned null` |
 | Prisma query without tenant context (`failClosed`, default) | Throws | `TenancyContextRequiredError` |
-| Non-HTTP context (WebSocket, gRPC) | — | Guard skips (no enforcement) |
+| WebSocket context | — | `TenancyGuard` skips it; no built-in restoration or enforcement |
+| Kafka, Bull, or gRPC context | Policy-dependent | Configure `TenantContextInterceptor`; the HTTP guard does not handle RPC |
 
 ## Fail-Closed Mode
 
@@ -618,7 +651,7 @@ const prisma = basePrisma.$extends(
 );
 ```
 
-> **Scope**: `failClosed` applies to Prisma **model operations** (`findMany`, `create`, `update`, etc.). Raw queries (`$queryRaw`, `$executeRaw`) bypass the extension and are **not** covered — use parameterized `set_config()` manually for raw queries.
+> **Scope**: `failClosed` applies to Prisma **model operations** (`findMany`, `create`, `update`, etc.). Raw queries (`$queryRaw`, `$executeRaw`) bypass the extension and are **not** covered. Use `tenancyTransaction()` and execute the raw operation through its transaction client, or use an equivalent explicit transaction that performs parameterized `set_config()` and the raw operation on the same transaction connection.
 
 ## Testing Utilities
 
@@ -670,6 +703,14 @@ Events: `tenant.resolved`, `tenant.not_found`, `tenant.extraction_failed`, `tena
 
 If `@nestjs/event-emitter` is not installed, events are silently skipped — no errors.
 
+Built-in request-bearing event producers emit only `requestSummary` (`method`,
+`path`, `ip`, `userAgent`, and `host`) so listeners do not accidentally retain credentials,
+cookies, bodies, or framework-specific request references. The deprecated
+optional `request` type field remains for source compatibility, but built-in
+middleware and guard producers have not included the raw request object since
+v0.11.0. Migrate listeners to `event.requestSummary`; do not expect built-in
+producers to populate `event.request`.
+
 ## Tenant ID Forgery Prevention
 
 Cross-validate the tenant ID against a secondary source to prevent header forgery:
@@ -712,6 +753,11 @@ TenancyModule.forRoot({
 ### Deprecation Policy
 
 Deprecated public APIs are marked with `@deprecated` JSDoc and listed in the changelog. Unless a security issue requires faster removal, deprecated APIs are planned for removal two minor versions later or at the next major release, whichever comes first.
+
+| API | Added | Deprecated | Replacement | Removal window |
+|-----|-------|------------|-------------|----------------|
+| `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | `tenancyTransaction()` (public Prisma APIs) | Eligibility begins in v0.17.0 or an earlier v1.0.0; the exact removal release is pending |
+| Event payload optional `request` type field | v0.4.0 | v0.11.0 | `requestSummary` (v0.11.0) | Eligible since v0.13.0 but retained through v0.15.x; the exact future minor or v1.0.0 removal release is pending |
 
 ## OpenTelemetry Integration
 
@@ -1044,7 +1090,7 @@ try {
 
 ### PgBouncer Support Contract
 
-This package supports **PgBouncer transaction mode** for pooled application queries. The repository matrix currently verifies PostgreSQL 16.14, PgBouncer 1.25.2, Prisma 6.19.3, and Prisma 7.9.1.
+The verified pooler contract covers the repository's pinned, self-hosted **PgBouncer transaction mode** configuration for pooled application queries. The matrix currently verifies PostgreSQL 16.14, PgBouncer 1.25.2, Prisma 6.19.3, and Prisma 7.9.1.
 
 - Configure `pool_mode = transaction` and `max_prepared_statements = 200`. With the tested PgBouncer 1.25.2 configuration, do not add the legacy `pgbouncer=true` URL parameter.
 - Use a direct PostgreSQL URL for Prisma CLI, migration, and test setup operations. Route application queries through the PgBouncer URL.
@@ -1053,7 +1099,7 @@ This package supports **PgBouncer transaction mode** for pooled application quer
 - A pool-size-two lane verifies real overlap on two backends, clean state on both, and clean replacement sessions after PgBouncer `RECONNECT`.
 - `tenancyTransaction()` is the canonical path. Its timeout, isolation, custom-key, context-setup failure, and rollback contracts are exercised against both supported Prisma majors. `maxWait` is positive-tested on Prisma 7 `PrismaPg` and Prisma 6 native, with the Prisma 6 `PrismaPg` limitation fixed as a negative contract. The batch extension and deprecated transparent compatibility mode are tested separately.
 - The runner fails fast unless the Prisma CLI, client, and PostgreSQL adapter all use the same supported major (6 or 7).
-- Prisma Data Proxy, managed PgBouncer services, and other custom pooler settings are not automatically covered by this exact configuration. Re-run the matrix with the mode and prepared-statement settings used in production.
+- Prisma Data Proxy, managed PgBouncer services, and other custom pooler settings remain outside the repository support guarantee. Deployment owners must validate the exact production mode and prepared-statement settings with equivalent isolation, rollback, reuse, and concurrency scenarios.
 
 Reproduce the pinned local matrix with Docker:
 

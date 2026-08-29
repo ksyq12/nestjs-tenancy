@@ -11,6 +11,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Made `TenancyModule`'s validated `dbSettingKey` the canonical runtime setting inherited by the Prisma extension and `tenancyTransaction()`. Explicit identical values remain compatible, while mismatches now fail before database work starts.
 - Updated CLI scaffolding to emit a custom database setting key once in module configuration while sharing the same default and validator across runtime, `init`, `check`, and `doctor`.
 
+### Documentation
+
+- Defined the latest-minor-only security support policy for the current 0.15.x line and separated declared Node.js, NestJS, and Prisma ranges from the combinations actually exercised by CI.
+- Documented that Node.js 20 remains in the current 0.15.x contract despite upstream EOL, with the planned Node.js 22.13.0 floor still pending.
+- Corrected the private vulnerability reporting path and centralized the current raw Prisma query, WebSocket, and managed-pooler guarantee boundaries.
+
+### Current Deprecation Inventory
+
+| API | Added | Deprecated since | Replacement | Removal window |
+|-----|-------|------------------|-------------|----------------|
+| `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | `tenancyTransaction()` | Eligibility begins in v0.17.0 or an earlier v1.0.0; the exact removal release remains to be selected |
+| Event payload optional `request` type field | v0.4.0 | v0.11.0 | `requestSummary` | Eligible since v0.13.0 but retained through v0.15.x; the exact future minor or v1.0.0 removal release remains to be selected |
+
 ## [0.15.0] - 2026-08-24
 
 ### Added
@@ -24,7 +37,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Added `maxWait` forwarding to `tenancyTransaction()` and expanded its transaction failure and isolation-level contracts.
-- Deprecated transparent interactive transaction support in favor of the explicit `tenancyTransaction()` API.
+- Deprecated transparent `interactiveTransactionSupport`, introduced in v0.6.0, in favor of the explicit `tenancyTransaction()` API. Removal eligibility begins in v0.17.0 or an earlier v1.0.0; the exact removal release is pending.
 - Updated the ecosystem compatibility baseline to the published `@nestarc/api-keys@0.3.1` and `@nestarc/jobs@0.3.1` packages.
 
 ## [0.14.0] - 2026-08-02
@@ -106,7 +119,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed (Breaking)
 
 - **Prisma extension fail-closed by default** — `createPrismaTenancyExtension()` now treats `failClosed` as `true` when omitted. Model operations without tenant context throw `TenancyContextRequiredError` unless the model is listed in `sharedModels` or the call runs inside `withoutTenant()`. Set `failClosed: false` explicitly to keep the previous pass-through behavior.
-- **Safe event request payloads** — built-in tenancy events now emit `requestSummary` (`{ method, path, ip, userAgent }`) instead of the raw request object. Listener code that reads `event.request` must migrate to `event.requestSummary`.
+- **Safe event request payloads** — built-in tenancy events now emit `requestSummary` (`{ method, path, ip, userAgent, host }`) instead of the raw request object. Listener code that reads `event.request` must migrate to `event.requestSummary`.
 
 ### Changed
 
@@ -138,12 +151,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Deprecation Policy
 
-Deprecated public APIs are marked with `@deprecated` JSDoc and documented here. Unless a security issue requires faster removal, deprecated APIs are planned for removal two minor versions later or at the next major release, whichever comes first. Current deprecated APIs:
+Deprecated public APIs are marked with `@deprecated` JSDoc and documented here. Unless a security issue requires faster removal, deprecated APIs are planned for removal two minor versions later or at the next major release, whichever comes first. At the v0.11.0 release, the deprecated APIs were:
 
 | API | Deprecated since | Planned removal |
 |-----|------------------|-----------------|
 | `crossCheckExtractor` | v0.10.0 | v0.12.0 |
 | `onCrossCheckFailed` | v0.10.0 | v0.12.0 |
+| Event payload optional `request` type field | v0.11.0 | v0.13.0 |
 
 ## [0.10.1] - 2026-04-08
 
