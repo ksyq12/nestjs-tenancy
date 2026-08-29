@@ -15,8 +15,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Made `TenancyModule`'s validated `dbSettingKey` the canonical runtime setting inherited by the Prisma extension and `tenancyTransaction()`. Explicit identical values remain compatible, while mismatches now fail before database work starts.
 - Updated CLI scaffolding to emit a custom database setting key once in module configuration while sharing the same default and validator across runtime, `init`, `check`, and `doctor`.
 
+### Fixed
+
+- Preserved synchronous tenant-scoped cache keys for `@nestjs/cache-manager` 2.x while retaining asynchronous base-key support for 3.x, preventing a Promise object from being passed to 2.x cache stores as the key.
+
+### Tests
+
+- Replaced the diagonal in-repository NestJS/Prisma compatibility override with isolated, strict-install packed-tarball consumers covering NestJS 10/11 × Prisma 6/7, including supported lower-bound and repository-locked optional cache/event profiles.
+
 ### Documentation
 
+- Documented the exact four-way NestJS/Prisma consumer evidence, valid optional cache/event pairings, and the separation between install/type/runtime smoke and database behavior lanes.
 - Defined the latest-minor-only security support policy for the current 0.15.x line and separated the already-published Node.js contract, the Unreleased 0.16.0 contract, and the NestJS/Prisma combinations actually exercised by CI.
 - Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, and the 0.16.0 compatibility-evidence release hold.
 - Corrected the private vulnerability reporting path and centralized the current raw Prisma query, WebSocket, and managed-pooler guarantee boundaries.

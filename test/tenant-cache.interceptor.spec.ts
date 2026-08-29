@@ -25,7 +25,7 @@ import { SHARED_TENANT_CACHE_KEY } from '../src/tenancy.constants';
 import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
 
 type BaseCacheKey =
-  | Promise<string | undefined | null>
+  | PromiseLike<string | undefined | null>
   | string
   | undefined
   | null;
@@ -100,11 +100,12 @@ describe('TenantCacheInterceptor', () => {
     const interceptor = new TestTenantCacheInterceptor(reflector, 'GET:/products');
     const execCtx = createExecutionContext();
 
-    const result = await tenancyContext.run('tenant-a', () =>
+    const result = tenancyContext.run('tenant-a', () =>
       interceptor.track(execCtx),
     );
 
     expect(result).toBe('tenant:8:tenant-a:GET:/products');
+    expect(result).not.toBeInstanceOf(Promise);
   });
 
   it('should preserve unsafe tenant ID characters with an unambiguous length prefix', async () => {
@@ -147,11 +148,29 @@ describe('TenantCacheInterceptor', () => {
     );
     const execCtx = createExecutionContext();
 
-    const result = await tenancyContext.run('tenant-a', () =>
+    const result = tenancyContext.run('tenant-a', () =>
       interceptor.track(execCtx),
     );
 
-    expect(result).toBe('tenant:8:tenant-a:GET:/products');
+    expect(result).toBeInstanceOf(Promise);
+    await expect(result).resolves.toBe('tenant:8:tenant-a:GET:/products');
+  });
+
+  it('should assimilate non-native thenable base cache keys', async () => {
+    const thenable = {
+      then(resolve: (value: string) => unknown) {
+        return Promise.resolve(resolve('GET:/products'));
+      },
+    } as unknown as BaseCacheKey;
+    const interceptor = new TestTenantCacheInterceptor(reflector, thenable);
+    const execCtx = createExecutionContext();
+
+    const result = tenancyContext.run('tenant-a', () =>
+      interceptor.track(execCtx),
+    );
+
+    expect(result).toBeInstanceOf(Promise);
+    await expect(result).resolves.toBe('tenant:8:tenant-a:GET:/products');
   });
 
   it.each([undefined, null, ''])(
@@ -172,7 +191,7 @@ describe('TenantCacheInterceptor', () => {
     const interceptor = new TestTenantCacheInterceptor(reflector, 'GET:/products');
     const execCtx = createExecutionContext();
 
-    await expect(interceptor.track(execCtx)).resolves.toBeUndefined();
+    expect(interceptor.track(execCtx)).toBeUndefined();
   });
 
   it('should diagnose a missing tenant before disabling cache', async () => {
@@ -186,7 +205,7 @@ describe('TenantCacheInterceptor', () => {
       },
     );
 
-    await expect(interceptor.track(createExecutionContext())).resolves.toBeUndefined();
+    expect(interceptor.track(createExecutionContext())).toBeUndefined();
     expect(onMissing).toHaveBeenCalledWith({
       transport: 'cache', operation: 'cache', resource: 'response-cache',
     });
@@ -198,7 +217,7 @@ describe('TenantCacheInterceptor', () => {
     const interceptor = new TestTenantCacheInterceptor(reflector, 'GET:/catalog');
     const execCtx = createExecutionContext(handler);
 
-    await expect(interceptor.track(execCtx)).resolves.toBe('shared:GET:/catalog');
+    expect(interceptor.track(execCtx)).toBe('shared:GET:/catalog');
   });
 
   it('should use shared prefix for class-level shared cache metadata', async () => {
@@ -207,7 +226,7 @@ describe('TenantCacheInterceptor', () => {
     const interceptor = new TestTenantCacheInterceptor(reflector, 'GET:/catalog');
     const execCtx = createExecutionContext(function handler() {}, CatalogController);
 
-    await expect(interceptor.track(execCtx)).resolves.toBe('shared:GET:/catalog');
+    expect(interceptor.track(execCtx)).toBe('shared:GET:/catalog');
   });
 
   it('should let shared metadata win over tenant context', async () => {
@@ -248,7 +267,7 @@ describe('TenantCacheInterceptor', () => {
     });
     const execCtx = createExecutionContext(handler);
 
-    await expect(interceptor.track(execCtx)).resolves.toBe('global|GET:/catalog');
+    expect(interceptor.track(execCtx)).toBe('global|GET:/catalog');
   });
 
   it('should hash tenant ID when hashTenantId is true', async () => {
@@ -343,9 +362,9 @@ describe('TenantCacheInterceptor', () => {
         ProductsController.prototype.findAll,
         ProductsController,
       );
-      await expect(
+      expect(() =>
         (interceptor as unknown as TrackByCapable).trackBy(execCtx),
-      ).rejects.toThrow('Tenant context is missing during cache.cache');
+      ).toThrow('Tenant context is missing during cache.cache');
     } finally {
       await moduleRef.close();
     }

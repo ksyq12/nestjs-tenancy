@@ -1,0 +1,10 @@
+{
+  "name": "@nestarc/tenancy-peer-compat-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "smoke": "node dist/smoke.js"
+  }
+}

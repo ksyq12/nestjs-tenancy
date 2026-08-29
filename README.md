@@ -84,13 +84,30 @@ they are not the same claim:
 | Area | Unreleased contract in this source tree | Current repository evidence |
 |------|--------------------|----------------------------------------|
 | Node.js | `^22.13.0 \|\| ^24.0.0` | Lint, unit/coverage, and build run on exact 22.13.0, the current Node 22 release, and the current Node 24 release. Database and infrastructure jobs run on current Node 22; publishing runs on current Node 24. |
-| NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | The locked primary graph uses NestJS 11.2.1. A current-Node-22 unit/build compatibility job covers NestJS 10 with Prisma 6, and the strict ecosystem fixture covers exact NestJS 10.4.20 with Prisma 6.19.3 on current Node 22. |
-| Prisma | Peer range `^6.0.0 \|\| ^7.0.0` | The locked primary and direct PostgreSQL lanes use Prisma 7.9.1. The PgBouncer matrix uses exact Prisma 6.19.3 and 7.9.1; the ecosystem lane uses exact Prisma 6.19.3. |
+| NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | A strict, isolated packed-tarball consumer matrix covers exact NestJS 10.4.22 and 11.2.1 across both supported Prisma majors on current Node 22. The locked primary graph uses NestJS 11.2.1, and the ecosystem fixture uses exact NestJS 10.4.20. |
+| Prisma | Peer range `^6.0.0 \|\| ^7.0.0` | The packed consumer matrix covers exact Prisma 6.19.3 and 7.9.1 with each supported NestJS major. The locked primary and direct PostgreSQL lanes use 7.9.1, the PgBouncer matrix uses both exact versions, and the ecosystem lane uses 6.19.3. |
 
-The peer ranges permit all four NestJS 10/11 × Prisma 6/7 combinations, but
-the repository does not yet strict-install and independently exercise that full
-cross-product. Exact versions above describe current evidence, not new minimum
-versions. Already-published 0.15.x artifacts retain their Node.js `>=20.19.0`
+The four-way consumer matrix installs the actual packed tarball with
+`--strict-peer-deps` and without `--force`, `--legacy-peer-deps`, or another
+peer bypass, then runs declaration typechecking and a minimal Nest/Prisma
+runtime smoke. Its Nest 10 + Prisma 6 lane
+also verifies the optional cache/event lower-bound representatives
+`@nestjs/cache-manager@2.0.0`, `cache-manager@5.0.0`, and
+`@nestjs/event-emitter@2.0.0` with `reflect-metadata@0.1.13`; its Nest 11 +
+Prisma 7 lane verifies the repository-locked supported representatives 3.1.3,
+7.2.8, and 3.1.0 respectively with `reflect-metadata@0.2.2`. The latter fixture
+also pins `keyv@5.6.0` and `cacheable@2.5.0` so the cache module's peer and
+declaration dependencies are reproducible. Optional peer ranges are not an
+arbitrary cross-product: cache module 2 pairs with cache-manager 5, cache module
+3 pairs with cache-manager 6/7, event-emitter 2 is verified on NestJS 10, and
+event-emitter 3 supports NestJS 10/11. These exact versions describe the
+top-level lane targets, not new patch-level minimums inside the declared peer
+ranges. Each run intentionally resolves a fresh transitive graph so CI detects
+upstream install drift; it is not a byte-for-byte frozen dependency snapshot.
+Prisma data-path behavior remains the responsibility of the direct
+PostgreSQL and Prisma 6/7 PgBouncer lanes rather than being duplicated in every
+install-only consumer lane. Already-published 0.15.x artifacts retain their
+Node.js `>=20.19.0`
 metadata, but Node.js 20 is [upstream EOL](https://nodejs.org/en/about/previous-releases)
 and is no longer supported by this source tree. The Node floor change is a
 breaking pre-1.0 change planned for 0.16.0; Node 20 consumers must upgrade their

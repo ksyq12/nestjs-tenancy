@@ -8,7 +8,14 @@ import { TENANT_CACHE_INTERCEPTOR_OPTIONS } from './tenant-cache.constants';
 import { TenantCacheInterceptorOptions } from './tenant-cache-options.interface';
 import { TenantContextDiagnostics } from '../diagnostics/tenant-context-diagnostics';
 
-type BaseCacheKey = Promise<string | undefined | null> | string | undefined | null;
+type CacheKeyValue = string | undefined | null;
+type BaseCacheKey = PromiseLike<CacheKeyValue> | CacheKeyValue;
+
+function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return value !== null
+    && (typeof value === 'object' || typeof value === 'function')
+    && typeof (value as PromiseLike<T>).then === 'function';
+}
 
 @Injectable()
 export class TenantCacheInterceptor extends CacheInterceptor {
@@ -42,8 +49,28 @@ export class TenantCacheInterceptor extends CacheInterceptor {
     return super.trackBy(context);
   }
 
-  protected async trackBy(context: ExecutionContext): Promise<string | undefined> {
-    const baseKey = await this.getBaseCacheKey(context);
+  /**
+   * Nest cache integration v2 declares a synchronous return while v3 accepts
+   * both synchronous and asynchronous keys. `any` is intentional at this
+   * protected compatibility seam so the emitted declaration can extend either
+   * base signature; the implementation still returns a typed value and keeps
+   * v2 synchronous because its interceptor passes the key directly to storage.
+   */
+  protected trackBy(context: ExecutionContext): any {
+    const baseKey = this.getBaseCacheKey(context);
+    if (isPromiseLike(baseKey)) {
+      return Promise.resolve(baseKey).then((resolvedKey) =>
+        this.scopeCacheKey(context, resolvedKey),
+      );
+    }
+
+    return this.scopeCacheKey(context, baseKey);
+  }
+
+  private scopeCacheKey(
+    context: ExecutionContext,
+    baseKey: CacheKeyValue,
+  ): string | undefined {
     if (!baseKey) {
       return undefined;
     }

@@ -46,27 +46,27 @@ jobs:
           fail_ci_if_error: false
 
   compat:
+    name: Packed consumer (${{ matrix.lane }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - nest: 10
-            prisma: 6
-            node: '22'
+        lane:
+          - nest10-prisma6
+          - nest10-prisma7
+          - nest11-prisma6
+          - nest11-prisma7
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: '22'
           check-latest: true
           cache: npm
 
       - run: npm ci
-      - name: Override to Nest ${{ matrix.nest }} + Prisma ${{ matrix.prisma }}
-        run: npm install @nestjs/common@${{ matrix.nest }} @nestjs/core@${{ matrix.nest }} @nestjs/testing@${{ matrix.nest }} @nestjs/platform-express@${{ matrix.nest }} @prisma/client@${{ matrix.prisma }} --no-save
-      - run: npm test
-      - run: npm run build
+      - run: npm run test:compat -- --lane ${{ matrix.lane }}
 
   e2e:
     runs-on: ubuntu-latest

@@ -21,8 +21,8 @@ the current Node.js 22 release, and the current Node.js 24 release. Publishing
 0.16.0 remains on hold until the tracked sibling-package compatibility evidence
 is complete. Node.js 26 support is not declared. See the README's
 [support and compatibility](./README.md#support-and-compatibility) section for
-the declared NestJS and Prisma ranges and the narrower set of combinations
-exercised by CI.
+the declared NestJS and Prisma ranges, the exact strict-consumer combinations,
+and the separate database behavior lanes exercised by CI.
 
 ## Reporting a Vulnerability
 
