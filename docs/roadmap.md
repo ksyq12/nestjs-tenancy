@@ -1,224 +1,97 @@
-# @nestarc/tenancy Roadmap
-
-> v0.6.0 구현 완료 (2026-04-02). 이 문서는 다음 단계를 정리합니다.
-
----
-
-## Phase 2: 실전 검증 + 차별화 (v0.2.0) ✅ 완료
-
-**목표**: "직접 구현해도 되지 않나?"에 대한 답을 만든다.
-
-### 2-1. 벤치마크 공개 ✅
-
-README에 PostgreSQL 16 + Prisma 6 기반 벤치마크 결과 공개 완료.
-
-### 2-2. 다중 추출 전략 ✅
-
-| 추출기 | 상태 | 사용 사례 |
-|--------|------|----------|
-| `HeaderTenantExtractor` | ✅ v0.1.0 | API 서버 |
-| `SubdomainTenantExtractor` | ✅ v0.2.0 | SaaS (tenant1.app.com) |
-| `JwtClaimTenantExtractor` | ✅ v0.2.0 | 인증 토큰 기반 |
-| `PathTenantExtractor` | ✅ v0.2.0 | /api/tenants/:id/... |
-| `CompositeTenantExtractor` | ✅ v0.2.0 | 여러 전략 폴백 체인 |
-
-### 2-3. Tenant Lifecycle Hooks ✅
-
-- `onTenantResolved(tenantId, req)` — AsyncLocalStorage 컨텍스트 내에서 실행
-- `onTenantNotFound(req)` — `void` 반환 시 관찰용, `'skip'` 반환 시 `next()` 차단, throw로 에러 처리
-
-### 2-4. Prisma 확장 고도화 ✅
-
-- **autoInjectTenantId**: `create`, `createMany`, `createManyAndReturn`, `upsert`에 자동 주입
-- **sharedModels**: 지정된 모델은 RLS + 주입 모두 건너뜀
-- **tenantIdField**: 커스텀 컬럼명 지원
-
-#### 알려진 제약
-
-- Interactive transaction 내에서는 `set_config`가 별도 커넥션에서 실행됨 (JSDoc 문서화 완료)
-- `@BypassTenancy()` Prisma 레벨 지원은 v0.3.0으로 이월
-
----
-
-## Phase 3: 생태계 확장 (v0.3.0) ✅ 완료
-
-### 3-0. v0.2.0에서 이월된 항목 ✅
-
-- **`withoutTenant()` 프로그래밍 방식 bypass**: 백그라운드 작업, 어드민 대시보드, 크로스 테넌트 쿼리용 ✅
-- **Subdomain ccTLD 대응**: `psl` 라이브러리로 정확한 서브도메인 추출 (`.co.uk` 등 multi-part TLD) ✅
-- **`tenancyTransaction()` helper**: Interactive transaction 내 RLS 올바른 동작 보장 ✅
-- **`experimentalTransactionSupport`**: Prisma 내부 API를 통한 투명한 interactive transaction 지원 (opt-in) ✅
-
-### 3-1. CLI 도구 ✅
-
-```bash
-npx @nestarc/tenancy init
-# → tenancy-setup.sql 생성 (RLS 정책 + 롤 + grants)
-# → tenancy.module-setup.ts 생성 (TenancyModule 등록 코드)
-```
-
-**도입 비용을 0에 가깝게** 만든다.
-
-### 3-2. 다중 DB 전략
-
-| 전략 | 격리 수준 | 복잡도 | 사용 사례 |
-|------|----------|--------|----------|
-| RLS (현재) | 행 수준 | 낮음 | 대부분의 SaaS |
-| Schema-per-tenant | 스키마 수준 | 중간 | 규제 산업 |
-| Database-per-tenant | DB 수준 | 높음 | 엔터프라이즈 |
-
-```typescript
-TenancyModule.forRoot({
-  strategy: 'rls',        // 기본값
-  // strategy: 'schema',  // 스키마 분리
-  // strategy: 'database', // DB 분리
-})
-```
-
-### 3-3. 프레임워크 확장
-
-- **Drizzle ORM 어댑터**: `createDrizzleTenancyExtension()`
-- **TypeORM 어댑터**: subscriber 기반 `SET LOCAL`
-- **MikroORM 어댑터**: filter 기반
-
-Prisma 전용이라는 한계를 벗어나면 사용자 풀이 넓어진다.
-
-### 3-4. Observability
-
-- **OpenTelemetry span**: tenant_id를 span attribute에 자동 추가
-- **로그 컨텍스트**: Pino/Winston에 tenant_id 자동 주입
-- **메트릭**: tenant별 쿼리 수, 지연 시간
-
----
-
-## Phase 3.5: 프로덕션 신뢰 기반 (v0.4.0) ✅ 완료
-
-### 3.5-1. Fail-Closed 모드 ✅
-
-- `failClosed: true` 옵션 — 테넌트 컨텍스트 없으면 쿼리 차단
-- `TenancyContextRequiredError` — model/operation 정보 포함
-- `withoutTenant()` 의도적 바이패스와 구분 (`bypassed` 플래그)
-
-### 3.5-2. 테스팅 유틸리티 ✅
-
-- `TestTenancyModule.register()` — 미들웨어/가드 없는 테스트 모듈
-- `withTenant(tenantId, callback)` — 비동기 테넌트 컨텍스트 헬퍼
-- `expectTenantIsolation()` — E2E 격리 검증 assertion
-- `@nestarc/tenancy/testing` 서브패스 export
-
-### 3.5-3. 이벤트 시스템 ✅
-
-- `@nestjs/event-emitter` optional 통합
-- 4개 이벤트: `tenant.resolved`, `tenant.not_found`, `tenant.validation_failed`, `tenant.context_bypassed`
-- `TenancyEventService` — EventEmitter2 미설치 시 graceful degradation
-
----
-
-## Phase 4: 마이크로서비스 기반 (v0.5.0) ✅ 완료
-
-### 4-0. 에러 타입 통일 (Breaking Change) ✅
-
-- `TenantContextMissingError` 기본 에러 클래스 추가
-- `TenancyContextRequiredError`가 이를 상속 → `instanceof` 통합 처리 가능
-- `getCurrentTenantOrThrow()` → `TenantContextMissingError` throw
-
-### 4-1. HTTP 테넌트 전파 ✅
-
-- `propagateTenantHeaders()` — 현재 테넌트를 HTTP 헤더로 반환하는 헬퍼 함수
-- `HttpTenantPropagator` — DI 기반 HTTP 전파 구현체
-- `TenantPropagator` — 전파 인터페이스 (v0.6.0 확장점)
-- 외부 의존성 제로 — fetch, axios, got, undici 모두 호환
-
----
-
-## Phase 4.5: 비동기 전파 (v0.6.0) ✅ 완료
-
-### 4.5-1. 메시지 큐 전파 ✅
-
-- **Bull Queue**: `BullTenantPropagator` — Job data에 테넌트 컨텍스트 자동 포함 ✅
-- **Kafka**: `KafkaTenantPropagator` — 메시지 헤더에 테넌트 ID 전파 (string/Buffer 지원) ✅
-- **gRPC**: `GrpcTenantPropagator` — metadata에 테넌트 ID 전파 ✅
-- **`TenantContextCarrier<T>`** 인터페이스 — OpenTelemetry inject/extract 패턴 ✅
-
-### 4.5-2. 전파 자동화 ✅
-
-- `TenantContextInterceptor` — 마이크로서비스 인바운드 자동 복원 (Kafka, Bull, gRPC) ✅
-- 명시적 `transport` 옵션으로 duck-typing 오탐 방지 ✅
-- HTTP는 skip (TenantMiddleware가 담당) ✅
-
-### 4.5-3. 안정화 및 CLI 강화 ✅
-
-- `interactiveTransactionSupport` — opt-in 구현 완료; Prisma 내부 API 의존으로 exact-version E2E 필요 ⚠️
-- CLI `check` — FORCE/POLICY/key 포함 deep validation ✅
-- CLI `--dry-run` — 파일 미생성 미리보기 ✅
-- `@@schema` 다중 스키마 — schema-qualified SQL 생성 ✅
-
----
-
-## Phase 4.7: 안정화 + 프레임워크 중립 (v0.9.0) ✅ 완료
-
-### 4.7-1. Express 타입 분리 ✅
-
-- `TenancyRequest` / `TenancyResponse` 프레임워크-중립 인터페이스 도입
-- `@types/express` peerDependencies에서 제거
-- 퍼블릭 API (TenantExtractor, TenancyModuleOptions, 이벤트 타입) Express 의존 제거
-- Fastify, raw Node.js HTTP 호환
-
-### 4.7-2. 문서 정비 ✅
-
-- README 호환성 주장 명확화 (E2E vs unit-tested)
-- 커스텀 추출기 예제 TenancyRequest 사용
-- SECURITY.md 지원 버전 최신화
-
----
-
-## Phase 4.8: 캐시 안전성 (v0.13.0) ✅ 완료
-
-### 4.8-1. Tenant-aware response cache ✅
-
-- `TenantCacheInterceptor` — 응답 캐시 키를 기본적으로 `tenant:{tenantId}:{baseCacheKey}` 형태로 분리
-- `@SharedTenantCache()` — 공개/공유 응답 캐시에 대한 명시적 opt-in
-- `@nestarc/tenancy/cache` 서브패스 — optional cache peer dependency를 root entrypoint에서 분리
-
----
-
-## Phase 5: 프로덕션 신뢰 (v1.0.0)
-
-### 5-1. 보안 강화
-
-- PgBouncer transaction mode 커넥션 격리 검증 ✅ (pool size 1/2, 재사용·교체·실패 cleanup, Prisma 6/7 실DB CI matrix/gate 추가)
-- Prisma Data Proxy 및 기타 managed pooler 호환성 검증 ⏳
-- tenant_id 위조 방지 (JWT claim과 헤더 교차 검증)
-- 감사 로그 (누가, 어떤 tenant에, 언제 접근했는지)
-
-### 5-2. 운영 도구
-
-- Health check endpoint (`/tenancy/health`)
-- Tenant 목록 조회 API (관리자용)
-- Migration helper (기존 단일 테넌트 → 멀티 테넌트 전환)
-
-### 5-3. 문서 + 커뮤니티
-
-- 공식 문서 사이트 (예제 중심)
-- 프로덕션 사례 1~2개 확보
-- NestJS 공식 레시피 기여 시도
-
----
-
-## 우선순위 요약
-
-```
-✅ v0.1.0 (완료)    코어 모듈 + 벤치마크 공개
-✅ v0.2.0 (완료)    다중 추출 전략 + Lifecycle Hooks + Prisma 고도화
-✅ v0.3.0 (완료)    withoutTenant() + tenancyTransaction() + ccTLD + CLI
-✅ v0.4.0 (완료)    Fail-Closed + Testing Utilities + Event System
-✅ v0.5.0 (완료)    에러 통일 + HTTP 테넌트 전파
-✅ v0.6.0 (완료)    비동기 전파 (Kafka, gRPC, Bull)
-✅ v0.7.0 (완료)    위조 방지 + OpenTelemetry
-✅ v0.8.0 (완료)    빌드 안정화 + 회귀 테스트
-✅ v0.9.0 (완료)    Express 타입 분리 + 프레임워크 중립
-✅ v0.13.0 (완료)   Tenant-aware cache interceptor + shared cache opt-in
-→ v1.0.0           보안 강화 + 운영 도구 + 문서 사이트 + 다중 DB + ORM 어댑터
-```
-
-**핵심 원칙**: 직접 구현하면 30분, 하지만 테스트 + 엣지 케이스 + 문서까지 하면 3일 걸리는 것들을 라이브러리가 해결해준다.
+# `@nestarc/tenancy` Roadmap
+
+> 기준선: published `v0.15.0` (2026-08-24)<br>
+> 최종 갱신: 2026-08-29 (Asia/Seoul)
+
+이 문서는 제품 방향과 이미 제공되는 기능을 요약한다. 현재 작업의 순서, 담당 상태, 완료 조건은
+[`2026-08-28-v0.15.0-maintenance-work-plan.md`](./2026-08-28-v0.15.0-maintenance-work-plan.md)를
+단일 실행 기준으로 사용한다. 정확한 릴리스별 변경 내역은 [`CHANGELOG.md`](../CHANGELOG.md)를 따른다.
+
+과거 roadmap, handover, plan/spec의 미체크 항목은 당시의 아이디어나 실행 메모일 뿐 현재 backlog나
+릴리스 약속이 아니다. 후보는 근거와 승인된 작업 ID가 생겼을 때만 현재 계획으로 승격한다.
+
+## 상태 정의
+
+| 상태 | 의미 |
+| --- | --- |
+| `완료` | published release 또는 공식 delivery surface에서 사용 가능한 기능 |
+| `검증됨` | 구현뿐 아니라 명시된 자동화 또는 실제 인프라 검증 근거가 있는 운영 계약 |
+| `보류` | 필요성은 알려졌지만 현재 release scope나 일정에 포함하지 않은 항목 |
+| `제안` | 수요·위협 모델·설계·검증 비용을 평가한 뒤 별도 작업으로 승인해야 하는 후보 |
+
+## v0.15 현재 범위
+
+`@nestarc/tenancy`는 NestJS request context와 PostgreSQL RLS를 Prisma에 연결하는 패키지다.
+현재 제품 범위는 Prisma/PostgreSQL 운영 계약이며, 범용 ORM 추상화나 모든 멀티테넌시 배치 전략을
+동시에 제공하는 것이 아니다.
+
+published `0.15.x`의 지원 metadata는 Node.js `>=20.19.0`, NestJS 10/11, Prisma 6/7이다.
+Node.js 22.13+/24로 올리는 계약은 아직 [`Unreleased`](../CHANGELOG.md#unreleased)이며 published
+`0.15.x` 지원과 혼동하지 않는다.
+
+### 완료 — v0.15 기준 제공 capability
+
+| 영역 | v0.15 상태 |
+| --- | --- |
+| HTTP tenant context | Header/Subdomain/JWT claim/Path/Composite 추출, lifecycle hook, `@CurrentTenant()`, `@BypassTenancy()` |
+| 안전한 기본 동작 | fail-closed Prisma extension, `withoutTenant()`, shared model, tenant ID 자동 주입 |
+| transaction | public Prisma API 기반 `tenancyTransaction()`과 deprecated compatibility 경로인 `interactiveTransactionSupport` |
+| 비동기 전파 | Kafka, Bull/BullMQ, gRPC carrier와 inbound context interceptor |
+| observability | tenancy event, optional OpenTelemetry, non-HTTP missing-context diagnostics |
+| 비-DB resource | Redis/search resource key, Bull/BullMQ payload context propagation, tenant-aware response cache |
+| CLI | Prisma schema 기반 `init`, 정적 drift `check`, live PostgreSQL `doctor`, multi-schema SQL 생성 |
+| testing | `@nestarc/tenancy/testing`과 실제 PostgreSQL/Redis/PgBouncer regression lane |
+| 문서 | [공식 패키지 가이드](https://nestarc.dev/packages/tenancy/)와 [API reference](https://nestarc.dev/api/tenancy/) 운영 |
+
+### 검증됨 — production evidence
+
+아래 표는 published `v0.15.0`의 증거와 이후 Unreleased maintenance gate를 함께 요약한다. 후자를
+`v0.15.0` artifact에 포함된 기능으로 해석하지 않으며, 정확한 경계는 CHANGELOG와 현재 작업 계획을 따른다.
+
+| 계약 | 검증 근거와 경계 |
+| --- | --- |
+| tenant ID 위조 방지 | HTTP opt-in `crossCheck`의 기본/명시적 `reject`는 primary·secondary 불일치를 차단한다. `log`는 관찰만 하며, secondary source 누락까지 차단하려면 `required: true`가 필요하다. 전파된 ID의 인증·권한 부여는 broker/application 책임이다. |
+| RLS fail-closed | 실제 application role과 owner/FORCE RLS fixture에서 no-context 차단 및 tenant A/B 격리를 검증한다. superuser와 raw query를 자동으로 안전하게 만드는 보증은 아니다. |
+| live DB doctor | catalog/role/policy/index 검사와 opt-in active isolation probe를 실제 PostgreSQL에서 검증한다. 현재 invocation당 한 table을 감사한다. |
+| transaction mode PgBouncer | PostgreSQL 16과 self-hosted PgBouncer transaction mode에서 Prisma 6/7의 backend 재사용·교체·동시성·commit·rollback·timeout·cleanup을 CI/release gate로 검증한다. managed/custom pooler 전체에 대한 일반 보증은 아니다. |
+| package compatibility | Unreleased maintenance gate에서 NestJS 10/11 × Prisma 6/7 네 strict tarball consumer 조합과 root/cache/testing/bin package shape를 검증한다. |
+| Nestarc ecosystem | API Keys → tenancy → RBAC → RLS/outbox → jobs → webhook 흐름을 strict tarball install E2E로 검증한다. |
+
+## 현재 유지보수 방향
+
+다음 작업은 roadmap 문구가 아니라 현재 유지보수 계획의 작업 ID와 완료 조건으로 관리한다.
+
+| 상태 | 방향 | 현재 결정 |
+| --- | --- | --- |
+| `보류` | `0.16.0` runtime 전환 | Node.js 22.13+/24 전환 자체는 준비됐지만 형제 패키지 compatibility evidence가 완료될 때까지 publish하지 않는다. |
+| `보류` | deprecated API 제거 | `interactiveTransactionSupport`와 legacy event field는 migration ADR과 제거 release가 정해질 때까지 호환 경로를 유지한다. |
+| `보류` | doctor batch/구조화 | tokenizer 분리와 manifest/batch 계약을 작은 순차 작업으로 검증한 뒤 진행한다. |
+
+## 보류·제안 — release promise 아님
+
+| 상태 | 후보 | 승격에 필요한 근거 |
+| --- | --- | --- |
+| `보류` | TypeORM/Drizzle/MikroORM adapter | 검증된 사용자 수요, ORM별 transaction/RLS semantics, 독립 compatibility matrix와 유지보수 예산 |
+| `제안` | schema-per-tenant / database-per-tenant | RLS로 해결되지 않는 구체적 규제·격리 요구, routing/migration/provisioning architecture와 운영 비용 평가 |
+| `제안` | managed pooler / Data Proxy 지원 | 특정 provider와 설정을 선택한 재현 가능한 isolation·rollback·reuse·concurrency matrix |
+| `제안` | WebSocket inbound boundary | 인증된 handshake/message/reconnect threat model과 실제 수요 |
+| `제안` | health endpoint / tenant admin API | 운영 주체, 인증·권한 model, library와 application 책임 경계 |
+| `제안` | 감사 로그 연동 | tenancy 내부에 감사 로그를 재구현하지 않는다. 형제 패키지 `@nestarc/audit-log`의 published contract와 opt-in integration을 별도 ecosystem 작업으로 검증한다. |
+
+ORM adapter와 schema/database tenancy는 `v1.0.0`의 확정 범위가 아니다. v1은 새 기능 묶음보다
+지원 범위, deprecated API migration, fail-closed/propagation 경계, package/release gate를 안정된 공개
+계약으로 확정하는 별도 release decision이 먼저다.
+
+## 릴리스 이력 요약
+
+| release | 상태 | 핵심 결과 |
+| --- | --- | --- |
+| `v0.1.0`–`v0.3.0` | `완료` | core module, extractor/lifecycle, Prisma extension, bypass/transaction helper, CLI |
+| `v0.4.0`–`v0.6.0` | `완료` | fail-closed/testing/events, HTTP 및 Kafka/Bull/gRPC propagation |
+| `v0.7.0`–`v0.12.0` | `완료` | tenant cross-check/telemetry, framework-neutral types, API·CLI safety cleanup |
+| `v0.13.0` | `완료` | tenant-aware response cache와 shared-cache opt-in |
+| `v0.14.0` | `완료` | Prisma 7 primary support와 Prisma 6 compatibility lane |
+| `v0.15.0` | `완료` | live DB doctor, Prisma 6/7 PgBouncer matrix, non-HTTP diagnostics/resources, Nestarc ecosystem E2E |
+
+새 후보의 상태나 목표 release를 정할 때는 이 표의 표현만 바꾸지 않는다. 먼저 현재 유지보수 계획에
+작업 ID, 선행 조건, 검증 명령, 보증 범위와 비범위를 기록한 뒤 roadmap에 반영한다.

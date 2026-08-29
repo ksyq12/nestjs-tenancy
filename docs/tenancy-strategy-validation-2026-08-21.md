@@ -1,5 +1,10 @@
 # `@nestarc/tenancy` 전략·기능 검증 및 세션 인수인계
 
+> [!IMPORTANT]
+> 이 문서의 조사 근거와 완료 증거는 유효하지만 7절과 8절의 실행 지침은 superseded되었다.
+> 현재 작업 선택, 상태, 완료 조건과 인계는
+> [`2026-08-28-v0.15.0-maintenance-work-plan.md`](./2026-08-28-v0.15.0-maintenance-work-plan.md)를 따른다.
+
 - 작성일: 2026-08-21 (Asia/Seoul)
 - 최초 검증 기준 커밋: `2fe5288` (`Release version 0.14.0`)
 - 검증 패키지 버전: `0.15.0`
@@ -506,8 +511,8 @@ HTTP는 이 policy의 대상이 아니다. 기존 middleware의 `tenant.not_foun
 
 TypeORM·Drizzle·MikroORM은 실제 구현이 아니라 roadmap/research에만 존재한다.
 
-- adapter roadmap: [`docs/roadmap.md`](./roadmap.md#L78)
-- v1 summary의 adapter 약속: [`docs/roadmap.md`](./roadmap.md#L207)
+- 현재 adapter 상태: [`docs/roadmap.md`](./roadmap.md)
+- M10 이전 v1 summary의 superseded adapter 약속: [`c9c448b` 시점 roadmap](https://github.com/nestarc/nestjs-tenancy/blob/c9c448ba4e4e7b7ed5634c29516dc7a30376d728/docs/roadmap.md)
 
 따라서 “지금 ORM 범위가 너무 넓다”는 현재 결함은 없다. 실제 문제는 Phase 완료 표기 및 v1 약속과 구현 상태의 불일치다. Prisma/PostgreSQL의 transaction, pooler, RLS 운영 검증을 먼저 보장 범위로 고정하는 것은 현재 구조와 일치한다.
 
