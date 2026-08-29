@@ -55,6 +55,18 @@ describe('TestTenancyModule', () => {
     });
   });
 
+  it('should provide a custom canonical database setting to TenancyService', async () => {
+    const module = await Test.createTestingModule({
+      imports: [
+        TestTenancyModule.register({ dbSettingKey: 'custom.test_tenant' }),
+      ],
+    }).compile();
+
+    expect(module.get(TenancyService).getDbSettingKey()).toBe(
+      'custom.test_tenant',
+    );
+  });
+
   it('should allow injecting TenancyService into other services', async () => {
     const module = await Test.createTestingModule({
       imports: [TestTenancyModule.register()],

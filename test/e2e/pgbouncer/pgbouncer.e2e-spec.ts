@@ -1,14 +1,19 @@
 import { createHash } from 'crypto';
 import * as path from 'path';
+import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Client } from 'pg';
 import { createPrismaTenancyExtension } from '../../../src/prisma/prisma-tenancy.extension';
 import { tenancyTransaction } from '../../../src/prisma/tenancy-transaction';
 import { TenancyContext } from '../../../src/services/tenancy-context';
 import { TenancyService } from '../../../src/services/tenancy.service';
+import { TenancyModule } from '../../../src/tenancy.module';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
+const CUSTOM_SETTING_KEY = 'app.pgbouncer_custom_tenant';
+const CUSTOM_SELECT_POLICY = 'ten_m03_custom_tenant_select';
+const CUSTOM_SELECT_GUARD_POLICY = 'ten_m03_custom_tenant_guard';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -445,42 +450,6 @@ describe(`tenancyTransaction() through PrismaPg ${PRISMA_VERSION}`, () => {
     expectNoContext(noContext);
   });
 
-  it('sets a custom setting key transaction-locally without touching the default key', async () => {
-    interface SettingProbe {
-      custom_setting: string | null;
-      default_setting: string | null;
-    }
-
-    const inTransaction = await context.run(TENANT_A, () =>
-      tenancyTransaction(
-        prisma,
-        service,
-        async (tx: any) => {
-          const rows = (await tx.$queryRawUnsafe(`
-            SELECT NULLIF(current_setting('app.pgbouncer_custom_tenant', true), '') AS custom_setting,
-                   NULLIF(current_setting('app.current_tenant', true), '') AS default_setting
-          `)) as SettingProbe[];
-          return rows[0];
-        },
-        { dbSettingKey: 'app.pgbouncer_custom_tenant' },
-      ),
-    );
-
-    const afterTransaction = (await prisma.$queryRawUnsafe(`
-      SELECT NULLIF(current_setting('app.pgbouncer_custom_tenant', true), '') AS custom_setting,
-             NULLIF(current_setting('app.current_tenant', true), '') AS default_setting
-    `)) as SettingProbe[];
-
-    expect(inTransaction).toEqual({
-      custom_setting: TENANT_A,
-      default_setting: null,
-    });
-    expect(afterTransaction[0]).toEqual({
-      custom_setting: null,
-      default_setting: null,
-    });
-  });
-
   it('runs with the requested PostgreSQL isolation level', async () => {
     const isolationLevel = await context.run(TENANT_B, () =>
       tenancyTransaction(
@@ -500,7 +469,7 @@ describe(`tenancyTransaction() through PrismaPg ${PRISMA_VERSION}`, () => {
     expectNoContext(await queryProbe(prisma));
   });
 
-  it('does not enter the callback when set_config fails', async () => {
+  it('rejects an invalid setting key before entering the callback', async () => {
     const callback = jest.fn(async () => 'unexpected');
 
     await expect(
@@ -509,7 +478,7 @@ describe(`tenancyTransaction() through PrismaPg ${PRISMA_VERSION}`, () => {
           dbSettingKey: 'server_version',
         }),
       ),
-    ).rejects.toThrow(/server_version|cannot be changed/i);
+    ).rejects.toThrow('Invalid database setting key');
 
     expect(callback).not.toHaveBeenCalled();
     expectNoContext(await queryProbe(prisma));
@@ -582,6 +551,149 @@ describe(`tenancyTransaction() through PrismaPg ${PRISMA_VERSION}`, () => {
       expectTenantResult(result, tenantId);
     }
     expectOneBackend(results.map(({ result }) => result.probe));
+  });
+});
+
+describe(`canonical custom dbSettingKey through PrismaPg ${PRISMA_VERSION}`, () => {
+  interface CustomSettingProbe {
+    custom_setting: string | null;
+    default_setting: string | null;
+    visible_count: number;
+  }
+
+  let moduleRef: TestingModule;
+  let context: TenancyContext;
+  let service: TenancyService;
+  let basePrisma: any;
+  let prisma: any;
+
+  async function queryCustomSettingProbe(
+    queryable: any,
+  ): Promise<CustomSettingProbe> {
+    const rows = (await queryable.$queryRawUnsafe(`
+      SELECT NULLIF(current_setting('${CUSTOM_SETTING_KEY}', true), '') AS custom_setting,
+             NULLIF(current_setting('app.current_tenant', true), '') AS default_setting,
+             (SELECT count(*)::int FROM users) AS visible_count
+    `)) as CustomSettingProbe[];
+    expect(rows).toHaveLength(1);
+    return rows[0];
+  }
+
+  async function runHelperProbe(tenantId: string): Promise<{
+    rows: Array<{ tenant_id: string; name: string }>;
+    probe: CustomSettingProbe;
+  }> {
+    return context.run(tenantId, () =>
+      tenancyTransaction(basePrisma, service, async (tx: any) => ({
+        rows: await tx.user.findMany({
+          orderBy: { name: 'asc' },
+          select: { tenant_id: true, name: true },
+        }),
+        probe: await queryCustomSettingProbe(tx),
+      })),
+    );
+  }
+
+  beforeAll(async () => {
+    // The permissive policy grants rows through the custom key. The matching
+    // restrictive guard prevents the fixture's default-key policy from making
+    // this regression pass if runtime configuration falls back to the default.
+    await directAdmin.query(`
+      DROP POLICY IF EXISTS ${CUSTOM_SELECT_POLICY} ON users;
+      DROP POLICY IF EXISTS ${CUSTOM_SELECT_GUARD_POLICY} ON users;
+      CREATE POLICY ${CUSTOM_SELECT_POLICY} ON users
+        FOR SELECT
+        USING (
+          tenant_id = current_setting('${CUSTOM_SETTING_KEY}', true)::text
+        );
+      CREATE POLICY ${CUSTOM_SELECT_GUARD_POLICY} ON users
+        AS RESTRICTIVE
+        FOR SELECT
+        USING (
+          tenant_id = current_setting('${CUSTOM_SETTING_KEY}', true)::text
+        );
+    `);
+
+    moduleRef = await Test.createTestingModule({
+      imports: [
+        TenancyModule.forRoot({
+          tenantExtractor: 'x-tenant-id',
+          dbSettingKey: CUSTOM_SETTING_KEY,
+        }),
+      ],
+    }).compile();
+    context = moduleRef.get(TenancyContext);
+    service = moduleRef.get(TenancyService);
+    basePrisma = createAdapterClient(APP_DATABASE_URL);
+    prisma = basePrisma.$extends(createPrismaTenancyExtension(service));
+    await prisma.$connect();
+  });
+
+  afterAll(async () => {
+    try {
+      if (basePrisma) await basePrisma.$disconnect();
+    } finally {
+      try {
+        if (moduleRef) await moduleRef.close();
+      } finally {
+        await directAdmin.query(`
+          DROP POLICY IF EXISTS ${CUSTOM_SELECT_GUARD_POLICY} ON users;
+          DROP POLICY IF EXISTS ${CUSTOM_SELECT_POLICY} ON users;
+        `);
+      }
+    }
+  });
+
+  it('uses the module key for extension tenant A/B and no-context RLS', async () => {
+    const tenantA = await context.run(TENANT_A, async () =>
+      await prisma.user.findMany({ orderBy: { name: 'asc' } }),
+    );
+    const tenantB = await context.run(TENANT_B, async () =>
+      await prisma.user.findMany({ orderBy: { name: 'asc' } }),
+    );
+    const noContextRows = await service.withoutTenant(async () =>
+      await prisma.user.findMany(),
+    );
+
+    expect(tenantA).toHaveLength(2);
+    expect(tenantA.every((row: any) => row.tenant_id === TENANT_A)).toBe(true);
+    expect(tenantB).toHaveLength(2);
+    expect(tenantB.every((row: any) => row.tenant_id === TENANT_B)).toBe(true);
+    expect(noContextRows).toHaveLength(0);
+    expect(await queryCustomSettingProbe(basePrisma)).toEqual({
+      custom_setting: null,
+      default_setting: null,
+      visible_count: 0,
+    });
+  });
+
+  it('uses the module key for helper tenant A/B and cleans no-context state', async () => {
+    const tenantA = await runHelperProbe(TENANT_A);
+    const tenantB = await runHelperProbe(TENANT_B);
+    const callback = jest.fn(async () => 'unexpected');
+
+    for (const [result, tenantId] of [
+      [tenantA, TENANT_A],
+      [tenantB, TENANT_B],
+    ] as const) {
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows.every((row) => row.tenant_id === tenantId)).toBe(true);
+      expect(result.probe).toEqual({
+        custom_setting: tenantId,
+        default_setting: null,
+        visible_count: 2,
+      });
+    }
+
+    await expect(
+      tenancyTransaction(basePrisma, service, callback),
+    ).rejects.toThrow(/tenant context/i);
+    expect(callback).not.toHaveBeenCalled();
+    expect(await queryCustomSettingProbe(basePrisma)).toEqual({
+      custom_setting: null,
+      default_setting: null,
+      visible_count: 0,
+    });
   });
 });
 

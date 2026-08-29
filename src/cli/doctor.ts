@@ -3,6 +3,7 @@ import {
   isValidPostgresSettingKey,
   quoteSqlIdentifier,
 } from '../postgres-safety';
+import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 
 export const DOCTOR_SCHEMA_VERSION = 1 as const;
 
@@ -203,7 +204,6 @@ class DoctorRuntimeError extends Error {
   }
 }
 
-const DEFAULT_SETTING_KEY = 'app.current_tenant';
 const DEFAULT_TENANT_COLUMN = 'tenant_id';
 
 const SESSION_SQL = `
@@ -1177,7 +1177,7 @@ function validateDoctorOptions(options: DoctorOptions): ValidatedDoctorOptions |
   if (typeof qualifiedTable === 'string') return qualifiedTable;
   if (!isSafeText(options.role)) return '--role must be a non-empty PostgreSQL role name without NUL bytes.';
 
-  const settingKey = options.dbSettingKey ?? DEFAULT_SETTING_KEY;
+  const settingKey = options.dbSettingKey ?? DEFAULT_DB_SETTING_KEY;
   if (!isValidPostgresSettingKey(settingKey)) {
     return '--db-setting-key must be a dotted PostgreSQL custom setting name (for example app.current_tenant).';
   }
@@ -1470,7 +1470,7 @@ export function doctorHelp(): string {
     'Catalog audit:',
     '  --table=<schema.table>              Fully-qualified table (required)',
     '  --role=<role>                       Expected current_user application role (required)',
-    `  --db-setting-key=<key>              Tenant setting key (default: ${DEFAULT_SETTING_KEY})`,
+    `  --db-setting-key=<key>              Tenant setting key (default: ${DEFAULT_DB_SETTING_KEY})`,
     `  --tenant-column=<column>            Tenant column (default: ${DEFAULT_TENANT_COLUMN})`,
     '',
     'Active read-only probe:',

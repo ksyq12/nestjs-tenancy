@@ -5,6 +5,7 @@ import {
   isValidPostgresSettingKey,
   quoteSqlIdentifier,
 } from '../postgres-safety';
+import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 
 interface CheckOptions {
   cwd?: string;
@@ -309,7 +310,7 @@ function escapeRegExp(value: string): string {
  */
 export function runCheck(options?: CheckOptions): CheckResult {
   const cwd = options?.cwd ?? process.cwd();
-  const expectedKey = options?.dbSettingKey ?? 'app.current_tenant';
+  const expectedKey = options?.dbSettingKey ?? DEFAULT_DB_SETTING_KEY;
   const tenantIdField = options?.tenantIdField ?? 'tenant_id';
 
   if (!isValidPostgresSettingKey(expectedKey)) {

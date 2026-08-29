@@ -19,8 +19,12 @@ import { TenantMiddleware } from './middleware/tenant.middleware';
 import { TenancyGuard } from './guards/tenancy.guard';
 import { TenancyEventService } from './events/tenancy-event.service';
 import { TenancyTelemetryService } from './telemetry/tenancy-telemetry.service';
-import { TENANCY_MODULE_OPTIONS } from './tenancy.constants';
+import {
+  TENANCY_MODULE_OPTIONS,
+  TENANCY_RUNTIME_CONFIG,
+} from './tenancy.constants';
 import { TenantContextDiagnostics } from './diagnostics/tenant-context-diagnostics';
+import { createTenancyRuntimeConfig } from './tenancy-runtime-config';
 
 function getNestMajorVersion(): number | null {
   try {
@@ -58,21 +62,30 @@ export class TenancyModule implements NestModule {
   }
 
   static forRoot(options: TenancyModuleOptions): DynamicModule {
-    return this.buildModule([
-      { provide: TENANCY_MODULE_OPTIONS, useValue: options },
-    ]);
+    const runtimeConfig = createTenancyRuntimeConfig(options);
+    return this.buildModule(
+      [{ provide: TENANCY_MODULE_OPTIONS, useValue: options }],
+      [],
+      { provide: TENANCY_RUNTIME_CONFIG, useValue: runtimeConfig },
+    );
   }
 
   static forRootAsync(options: TenancyModuleAsyncOptions): DynamicModule {
     return this.buildModule(
       this.createAsyncProviders(options),
       options.imports || [],
+      {
+        provide: TENANCY_RUNTIME_CONFIG,
+        useFactory: createTenancyRuntimeConfig,
+        inject: [TENANCY_MODULE_OPTIONS],
+      },
     );
   }
 
   private static buildModule(
     optionsProviders: Provider[],
-    imports: TenancyModuleAsyncOptions['imports'] = [],
+    imports: TenancyModuleAsyncOptions['imports'],
+    runtimeConfigProvider: Provider,
   ): DynamicModule {
     return {
       module: TenancyModule,
@@ -80,6 +93,7 @@ export class TenancyModule implements NestModule {
       imports,
       providers: [
         ...optionsProviders,
+        runtimeConfigProvider,
         TenancyContext,
         TenancyService,
         TenancyEventService,

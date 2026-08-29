@@ -191,7 +191,6 @@ The example uses the Prisma 7 `prisma-client` generator and its required Postgre
 
 ```typescript
 createPrismaTenancyExtension(tenancyService, {
-  dbSettingKey: 'app.current_tenant',  // PostgreSQL setting key (default)
   autoInjectTenantId: true,            // Auto-inject tenant_id on create/upsert
   tenantIdField: 'tenant_id',          // Column name for tenant ID (default)
   sharedModels: ['Country', 'Currency'], // Models that skip RLS entirely
@@ -200,14 +199,16 @@ createPrismaTenancyExtension(tenancyService, {
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `dbSettingKey` | `string` | `'app.current_tenant'` | PostgreSQL session variable name |
+| `dbSettingKey` | `string` | Inherited from `TenancyService` | Optional compatibility assertion; normally omit it in module-based applications. A mismatch fails before extension creation. |
 | `autoInjectTenantId` | `boolean` | `false` | Auto-inject tenant ID into `create`, `createMany`, `createManyAndReturn`, `upsert` |
 | `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
 | `failClosed` | `boolean` | `true` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
 | `interactiveTransactionSupport` | `boolean` | `false` | **Deprecated.** Compatibility-only transparent mode based on Prisma internals. Use `tenancyTransaction()` for interactive transactions |
 
-> **Important:** If you customize `dbSettingKey` in `TenancyModule.forRoot()`, pass the same value to `createPrismaTenancyExtension()` and `tenancyTransaction()`. These are independent configurations that must match your PostgreSQL `current_setting()` calls.
+> **Important:** Configure a custom `dbSettingKey` once in `TenancyModule.forRoot()` or `forRootAsync()`. `createPrismaTenancyExtension()` and `tenancyTransaction()` inherit the canonical value from `TenancyService`. An explicitly repeated identical value remains accepted for compatibility, while a different value fails before extension creation or transaction start. PostgreSQL RLS `current_setting()` calls must still use the same key.
+
+> **Migration note:** Existing repeated identical values can be removed gradually. If a custom key currently exists only on the extension or helper, add it to `TenancyModule` before removing those options. Standalone consumers that construct `TenancyService` directly may continue to pass an explicit custom key. Changing the key itself also requires updating the RLS policies and passing the same `--db-setting-key` to `check` and `doctor`.
 
 > **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Use the `tenancyTransaction()` helper. The deprecated `interactiveTransactionSupport: true` mode remains only as a compatibility path for existing consumers. See [Interactive Transactions](#interactive-transactions) below.
 
@@ -231,11 +232,10 @@ await tenancyTransaction(prisma, tenancyService, async (tx) => {
   maxWait: 2_000,                 // Wait to start the transaction (ms)
   timeout: 5_000,                 // Maximum transaction duration (ms)
   isolationLevel: 'Serializable', // Optional PostgreSQL isolation level
-  dbSettingKey: 'app.current_tenant',
 });
 ```
 
-The helper forwards Prisma's public interactive transaction options (`maxWait`, `timeout`, and `isolationLevel`). It resolves the tenant before starting the transaction, applies transaction-local `set_config()` before invoking your callback, and propagates transaction-start, context-setup, callback, timeout, and database errors unchanged.
+The helper forwards Prisma's public interactive transaction options (`maxWait`, `timeout`, and `isolationLevel`). It resolves the canonical database setting key and tenant before starting the transaction, applies transaction-local `set_config()` before invoking your callback, and propagates transaction-start, context-setup, callback, timeout, and database errors unchanged. A mismatched explicit key fails before `$transaction()` is called.
 
 `maxWait` enforcement belongs to the Prisma runtime. The verified Prisma 7.9.1 `PrismaPg` adapter and Prisma 6.19.3 native engine reject when their client connection pool cannot start in time. Prisma 6.19.3 `PrismaPg` accepts the option but does not enforce it under adapter-pool contention; the matrix keeps this as a negative contract. If bounded transaction admission is required on Prisma 6, use the native engine or enforce admission before calling the helper.
 
@@ -318,6 +318,7 @@ export class SomeService {
   doSomething() {
     const tenantOrNull = this.tenancy.getCurrentTenant();    // string | null
     const tenantId = this.tenancy.getCurrentTenantOrThrow(); // string (throws if missing)
+    const settingKey = this.tenancy.getDbSettingKey();       // canonical PostgreSQL setting
   }
 }
 ```
@@ -1113,6 +1114,8 @@ npx @nestarc/tenancy check --db-setting-key=custom.tenant_key
 ```
 
 Validates table coverage, tenant indexes, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency across all policies. Exits with code 0 (in sync) or 1 (drift detected).
+
+`check` and `doctor` do not load Nest module configuration. When the canonical module key is custom, pass the same `--db-setting-key` to both commands. `init` writes that selected key to the generated SQL and the module configuration once; the generated Prisma extension inherits it from `TenancyService`.
 
 Audit an applied RLS configuration through the same non-superuser database role used by the application:
 

@@ -2,7 +2,11 @@ import { DynamicModule, Module } from '@nestjs/common';
 import { TenancyContext } from '../services/tenancy-context';
 import { TenancyService } from '../services/tenancy.service';
 import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
-import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
+import {
+  TENANCY_MODULE_OPTIONS,
+  TENANCY_RUNTIME_CONFIG,
+} from '../tenancy.constants';
+import { createTenancyRuntimeConfig } from '../tenancy-runtime-config';
 
 export type TestTenancyModuleOptions = Partial<TenancyModuleOptions>;
 
@@ -40,6 +44,10 @@ export class TestTenancyModule {
       global: true,
       providers: [
         { provide: TENANCY_MODULE_OPTIONS, useValue: tenancyOptions },
+        {
+          provide: TENANCY_RUNTIME_CONFIG,
+          useValue: createTenancyRuntimeConfig(tenancyOptions),
+        },
         TenancyContext,
         TenancyService,
       ],

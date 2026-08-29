@@ -4,6 +4,7 @@ import { parseModels } from './prisma-schema-parser';
 import { generateSetupSql } from './templates/setup-sql';
 import { generateModuleSetup } from './templates/module-setup';
 import { isValidPostgresSettingKey } from '../postgres-safety';
+import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 
 interface InitOptions {
   cwd?: string;
@@ -97,7 +98,7 @@ export async function runInit(options?: InitOptions): Promise<InitResult> {
       type: 'text',
       name: 'dbSettingKey',
       message: 'Database setting key',
-      initial: 'app.current_tenant',
+      initial: DEFAULT_DB_SETTING_KEY,
     },
     {
       type: 'confirm',

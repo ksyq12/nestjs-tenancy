@@ -1,7 +1,6 @@
 import { Prisma } from '@prisma/client/extension';
 import { TenancyService } from '../services/tenancy.service';
 import { TenancyContextRequiredError } from '../errors/tenancy-context-required.error';
-import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 
 type PrismaRawExecutor = (
   strings: TemplateStringsArray,
@@ -29,6 +28,11 @@ interface PrismaOperationContext {
 }
 
 export interface PrismaTenancyExtensionOptions {
+  /**
+   * Optional compatibility assertion for the canonical setting configured on
+   * `TenancyService`. Omit this when using `TenancyModule`; a different value
+   * fails before the extension is created.
+   */
   dbSettingKey?: string;
   autoInjectTenantId?: boolean;
   tenantIdField?: string;
@@ -77,7 +81,7 @@ export interface PrismaTenancyExtensionOptions {
  * requires string interpolation. This eliminates SQL injection risk entirely.
  *
  * Options:
- * - `dbSettingKey`: PostgreSQL session variable name (default: app.current_tenant)
+ * - `dbSettingKey`: Optional assertion matching the TenancyService canonical key
  * - `autoInjectTenantId`: Automatically inject tenant ID into write operations
  * - `tenantIdField`: Field name to inject tenant ID into (default: tenant_id)
  * - `sharedModels`: Models that are shared across tenants (skips RLS and injection)
@@ -100,7 +104,9 @@ export function createPrismaTenancyExtension(
   tenancyService: TenancyService,
   options?: PrismaTenancyExtensionOptions,
 ) {
-  const settingKey = options?.dbSettingKey ?? DEFAULT_DB_SETTING_KEY;
+  const settingKey = tenancyService.resolveDbSettingKey(
+    options?.dbSettingKey,
+  );
   const sharedModels = new Set(options?.sharedModels ?? []);
   const autoInject = options?.autoInjectTenantId ?? false;
   const tenantIdField = options?.tenantIdField ?? 'tenant_id';

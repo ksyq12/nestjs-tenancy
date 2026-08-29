@@ -1,13 +1,18 @@
 import { Client } from 'pg';
+import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as path from 'path';
 import { TenancyContext } from '../../src/services/tenancy-context';
 import { TenancyService } from '../../src/services/tenancy.service';
 import { createPrismaTenancyExtension } from '../../src/prisma/prisma-tenancy.extension';
 import { tenancyTransaction } from '../../src/prisma/tenancy-transaction';
+import { TenancyModule } from '../../src/tenancy.module';
 
 const TENANT_1 = '11111111-1111-1111-1111-111111111111';
 const TENANT_2 = '22222222-2222-2222-2222-222222222222';
+const CUSTOM_SETTING_KEY = 'app.direct_custom_tenant';
+const CUSTOM_SELECT_POLICY = 'ten_m03_direct_custom_tenant_select';
+const CUSTOM_SELECT_GUARD_POLICY = 'ten_m03_direct_custom_tenant_guard';
 
 const ADMIN_URL =
   process.env.DATABASE_URL ?? 'postgresql://tenancy:tenancy@localhost:5433/tenancy_test';
@@ -139,6 +144,108 @@ describe('Prisma Extension + RLS Integration', () => {
     expect(rows2.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
     expect(rows1).toHaveLength(2);
     expect(rows2).toHaveLength(2);
+  });
+});
+
+describe('Prisma 7 canonical custom dbSettingKey integration', () => {
+  let moduleRef: TestingModule;
+  let context: TenancyContext;
+  let service: TenancyService;
+  let basePrisma: any;
+  let prisma: any;
+
+  beforeAll(async () => {
+    // The custom permissive policy enables the configured key, while the
+    // restrictive guard prevents the fixture's default-key policy from making
+    // this regression pass if runtime configuration falls back to that key.
+    await sharedAdminClient.query(`
+      DROP POLICY IF EXISTS ${CUSTOM_SELECT_GUARD_POLICY} ON users;
+      DROP POLICY IF EXISTS ${CUSTOM_SELECT_POLICY} ON users;
+      CREATE POLICY ${CUSTOM_SELECT_POLICY} ON users
+        AS PERMISSIVE
+        FOR SELECT
+        USING (
+          tenant_id = current_setting('${CUSTOM_SETTING_KEY}', true)::text
+        );
+      CREATE POLICY ${CUSTOM_SELECT_GUARD_POLICY} ON users
+        AS RESTRICTIVE
+        FOR SELECT
+        USING (
+          tenant_id = current_setting('${CUSTOM_SETTING_KEY}', true)::text
+        );
+    `);
+
+    moduleRef = await Test.createTestingModule({
+      imports: [
+        TenancyModule.forRoot({
+          tenantExtractor: 'x-tenant-id',
+          dbSettingKey: CUSTOM_SETTING_KEY,
+        }),
+      ],
+    }).compile();
+    context = moduleRef.get(TenancyContext);
+    service = moduleRef.get(TenancyService);
+
+    const PrismaClient = require(path.join(__dirname, 'generated', 'client')).PrismaClient;
+    basePrisma = createClient(PrismaClient, APP_URL);
+    prisma = basePrisma.$extends(createPrismaTenancyExtension(service));
+    await prisma.$connect();
+  }, 30000);
+
+  afterAll(async () => {
+    try {
+      if (basePrisma) await basePrisma.$disconnect();
+    } finally {
+      try {
+        if (moduleRef) await moduleRef.close();
+      } finally {
+        await sharedAdminClient.query(`
+          DROP POLICY IF EXISTS ${CUSTOM_SELECT_GUARD_POLICY} ON users;
+          DROP POLICY IF EXISTS ${CUSTOM_SELECT_POLICY} ON users;
+        `);
+      }
+    }
+  });
+
+  it('uses the module key for extension tenant A/B and no-context RLS', async () => {
+    const tenant1Rows = await context.run(TENANT_1, async () =>
+      prisma.user.findMany({ orderBy: { name: 'asc' } }),
+    );
+    const tenant2Rows = await context.run(TENANT_2, async () =>
+      prisma.user.findMany({ orderBy: { name: 'asc' } }),
+    );
+    const noContextRows = await service.withoutTenant(async () =>
+      prisma.user.findMany(),
+    );
+
+    expect(tenant1Rows).toHaveLength(2);
+    expect(tenant1Rows.every((row: any) => row.tenant_id === TENANT_1)).toBe(true);
+    expect(tenant2Rows).toHaveLength(2);
+    expect(tenant2Rows.every((row: any) => row.tenant_id === TENANT_2)).toBe(true);
+    expect(noContextRows).toHaveLength(0);
+  });
+
+  it('uses the module key for helper tenant A/B and leaves no context behind', async () => {
+    const findTenantRows = (tenantId: string) =>
+      context.run(tenantId, () =>
+        tenancyTransaction(basePrisma, service, async (tx: any) =>
+          tx.user.findMany({ orderBy: { name: 'asc' } }),
+        ),
+      );
+
+    const tenant1Rows = await findTenantRows(TENANT_1);
+    const tenant2Rows = await findTenantRows(TENANT_2);
+    const callback = jest.fn(async () => 'unexpected');
+
+    expect(tenant1Rows).toHaveLength(2);
+    expect(tenant1Rows.every((row: any) => row.tenant_id === TENANT_1)).toBe(true);
+    expect(tenant2Rows).toHaveLength(2);
+    expect(tenant2Rows.every((row: any) => row.tenant_id === TENANT_2)).toBe(true);
+    await expect(
+      tenancyTransaction(basePrisma, service, callback),
+    ).rejects.toThrow(/tenant context/i);
+    expect(callback).not.toHaveBeenCalled();
+    expect(await basePrisma.user.findMany()).toHaveLength(0);
   });
 });
 

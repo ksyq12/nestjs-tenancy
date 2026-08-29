@@ -2,6 +2,9 @@
 export const TENANCY_MODULE_OPTIONS = Symbol.for(
   '@nestarc/tenancy/TENANCY_MODULE_OPTIONS',
 );
+export const TENANCY_RUNTIME_CONFIG = Symbol.for(
+  '@nestarc/tenancy/TENANCY_RUNTIME_CONFIG',
+);
 export const BYPASS_TENANCY_KEY = Symbol.for(
   '@nestarc/tenancy/BYPASS_TENANCY_KEY',
 );

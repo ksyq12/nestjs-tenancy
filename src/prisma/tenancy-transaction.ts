@@ -1,5 +1,4 @@
 import { TenancyService } from '../services/tenancy.service';
-import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 
 /**
  * Minimal transaction client shape required by `tenancyTransaction`.
@@ -32,6 +31,10 @@ export interface TenancyTransactionOptions {
   timeout?: number;
   /** PostgreSQL transaction isolation level. */
   isolationLevel?: 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable';
+  /**
+   * Optional compatibility assertion for the canonical setting configured on
+   * `TenancyService`. Omit it when using `TenancyModule`.
+   */
   dbSettingKey?: string;
 }
 
@@ -56,8 +59,10 @@ export async function tenancyTransaction<
   callback: (tx: TTx) => Promise<T>,
   options?: TenancyTransactionOptions,
 ): Promise<T> {
+  const settingKey = tenancyService.resolveDbSettingKey(
+    options?.dbSettingKey,
+  );
   const tenantId = tenancyService.getCurrentTenantOrThrow();
-  const settingKey = options?.dbSettingKey ?? DEFAULT_DB_SETTING_KEY;
 
   return prisma.$transaction(
     async (tx: TTx) => {

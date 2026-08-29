@@ -5,6 +5,8 @@ import {
   PrismaTransactionClient,
   PrismaTransactionContext,
 } from '../src/prisma/tenancy-transaction';
+import { Test } from '@nestjs/testing';
+import { TenancyModule } from '../src/tenancy.module';
 
 describe('tenancyTransaction', () => {
   let context: TenancyContext;
@@ -89,7 +91,16 @@ describe('tenancyTransaction', () => {
     });
   });
 
-  it('should use custom dbSettingKey', async () => {
+  it('should use a custom module dbSettingKey when helper options omit it', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        TenancyModule.forRoot({
+          tenantExtractor: 'x-tenant-id',
+          dbSettingKey: 'custom.tenant',
+        }),
+      ],
+    }).compile();
+    const configuredService = moduleRef.get(TenancyService);
     const { mockPrisma, mockTransaction } = buildMockPrisma();
 
     mockTransaction.mockImplementation(async (cb: any) => {
@@ -103,17 +114,99 @@ describe('tenancyTransaction', () => {
       return result;
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await tenancyTransaction(
-            mockPrisma, service, async () => 'ok',
-            { dbSettingKey: 'custom.tenant' },
-          );
-          resolve();
-        } catch (e) { reject(e); }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        context.run('tenant-123', async () => {
+          try {
+            await tenancyTransaction(
+              mockPrisma, configuredService, async () => 'ok',
+            );
+            resolve();
+          } catch (e) { reject(e); }
+        });
       });
+    } finally {
+      await moduleRef.close();
+    }
+  });
+
+  it('should fail before starting a transaction when dbSettingKey mismatches', async () => {
+    const configuredService = new TenancyService(context, undefined, {
+      dbSettingKey: 'custom.tenant',
     });
+    const { mockPrisma, mockTransaction } = buildMockPrisma();
+    const callback = jest.fn(async () => 'unexpected');
+
+    await context.run('tenant-123', async () => {
+      await expect(
+        tenancyTransaction(mockPrisma, configuredService, callback, {
+          dbSettingKey: 'other.tenant',
+        }),
+      ).rejects.toThrow(/dbSettingKey mismatch.*custom\.tenant.*other\.tenant/i);
+    });
+
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('should reject an invalid dbSettingKey before resolving tenant or starting a transaction', async () => {
+    const { mockPrisma, mockTransaction } = buildMockPrisma();
+    const callback = jest.fn(async () => 'unexpected');
+
+    await expect(
+      tenancyTransaction(mockPrisma, service, callback, {
+        dbSettingKey: 'server_version',
+      }),
+    ).rejects.toThrow('Invalid database setting key');
+
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('should accept an explicit dbSettingKey that matches the canonical value', async () => {
+    const configuredService = new TenancyService(context, undefined, {
+      dbSettingKey: 'custom.tenant',
+    });
+    const { mockPrisma, mockTransaction } = buildMockPrisma();
+
+    mockTransaction.mockImplementation(async (cb: any) =>
+      cb({ $executeRaw: jest.fn().mockResolvedValue(1) }),
+    );
+
+    await context.run('tenant-123', async () => {
+      await expect(
+        tenancyTransaction(
+          mockPrisma,
+          configuredService,
+          async () => 'ok',
+          { dbSettingKey: 'custom.tenant' },
+        ),
+      ).resolves.toBe('ok');
+    });
+  });
+
+  it('should preserve standalone explicit custom dbSettingKey compatibility', async () => {
+    const { mockPrisma, mockTransaction } = buildMockPrisma();
+    const mockExecuteRaw = jest.fn().mockResolvedValue(1);
+
+    mockTransaction.mockImplementation(async (cb: any) =>
+      cb({ $executeRaw: mockExecuteRaw }),
+    );
+
+    await context.run('tenant-123', async () => {
+      await tenancyTransaction(
+        mockPrisma,
+        service,
+        async () => 'ok',
+        { dbSettingKey: 'standalone.tenant' },
+      );
+    });
+
+    expect(mockExecuteRaw).toHaveBeenCalledWith(
+      ['SELECT set_config(', ', ', ', TRUE)'],
+      'standalone.tenant',
+      'tenant-123',
+    );
   });
 
   it('should pass isolationLevel option to $transaction', async () => {

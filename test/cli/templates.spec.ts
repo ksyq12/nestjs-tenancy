@@ -360,13 +360,24 @@ describe('generateModuleSetup', () => {
     expect(result).toContain('dbSettingKey: "app.tenant",');
   });
 
-  it('should include extension options block when only dbSettingKey is custom', () => {
+  it('should keep a custom dbSettingKey only in the canonical module config', () => {
     const result = generateModuleSetup({
       ...baseOptions,
       dbSettingKey: 'app.tenant',
     });
+    expect(result).toContain('createPrismaTenancyExtension(tenancyService)');
+    expect(result.match(/dbSettingKey: "app\.tenant",/g)).toHaveLength(1);
+  });
+
+  it('should not duplicate a custom dbSettingKey into other extension options', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      dbSettingKey: 'app.tenant',
+      autoInjectTenantId: true,
+    });
     expect(result).toContain('createPrismaTenancyExtension(tenancyService, {');
-    expect(result).toContain('dbSettingKey: "app.tenant",');
+    expect(result).toContain('autoInjectTenantId: true,');
+    expect(result.match(/dbSettingKey: "app\.tenant",/g)).toHaveLength(1);
   });
 
   it('should always include Prisma extension block', () => {

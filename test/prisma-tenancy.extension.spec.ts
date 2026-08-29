@@ -9,6 +9,8 @@ import { TenantMiddleware } from '../src/middleware/tenant.middleware';
 import { TenancyTelemetryService } from '../src/telemetry/tenancy-telemetry.service';
 import { TenancyModuleOptions } from '../src/interfaces/tenancy-module-options.interface';
 import { createMockEventService } from './__helpers__/mocks';
+import { Test } from '@nestjs/testing';
+import { TenancyModule } from '../src/tenancy.module';
 
 /**
  * Unit tests for createPrismaTenancyExtension.
@@ -183,36 +185,120 @@ describe('createPrismaTenancyExtension', () => {
     });
   });
 
-  it('should use custom dbSettingKey', async () => {
-    const { mockPrisma, mockTransaction } = buildMockPrisma();
+  it('should use a custom module dbSettingKey when extension options omit it', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        TenancyModule.forRoot({
+          tenantExtractor: 'x-tenant-id',
+          dbSettingKey: 'custom.tenant',
+        }),
+      ],
+    }).compile();
+    const configuredService = moduleRef.get(TenancyService);
+    const { mockPrisma, mockTransaction, mockExecuteRaw } = buildMockPrisma();
+    const capturedSetConfigArgs: any[] = [];
 
     capturedFactory = null;
-    createPrismaTenancyExtension(service, { dbSettingKey: 'custom.tenant' });
+    createPrismaTenancyExtension(configuredService);
     const extensionConfig = capturedFactory!(mockPrisma);
     const handler = extensionConfig.query.$allModels.$allOperations;
 
-    mockTransaction.mockResolvedValue([1, []]);
-
-    await new Promise<void>((resolve, reject) => {
-      context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
-        try {
-          await handler({
-            model: 'TestModel',
-            operation: 'findMany',
-            args: {},
-            query: jest.fn().mockReturnValue(Promise.resolve([])),
-          });
-
-          // Verify $executeRaw was called via tagged template
-          // The first arg to $transaction is the array, and the first element
-          // is the $executeRaw call which would contain our custom key
-          expect(mockTransaction).toHaveBeenCalled();
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
+    mockExecuteRaw.mockImplementation((...args: any[]) => {
+      capturedSetConfigArgs.push(args);
+      return Promise.resolve(1);
     });
+    mockTransaction.mockImplementation(async (queries: any[]) =>
+      Promise.all(queries),
+    );
+
+    try {
+      await context.run(
+        '550e8400-e29b-41d4-a716-446655440000',
+        () => handler({
+          model: 'TestModel',
+          operation: 'findMany',
+          args: {},
+          query: jest.fn().mockResolvedValue([]),
+        }),
+      );
+
+      expect(capturedSetConfigArgs).toHaveLength(1);
+      expect(capturedSetConfigArgs[0].slice(1)).toEqual([
+        'custom.tenant',
+        '550e8400-e29b-41d4-a716-446655440000',
+      ]);
+    } finally {
+      await moduleRef.close();
+    }
+  });
+
+  it('should fail before creating an extension when dbSettingKey mismatches', () => {
+    const configuredService = new TenancyService(context, undefined, {
+      dbSettingKey: 'custom.tenant',
+    });
+
+    expect(() =>
+      createPrismaTenancyExtension(configuredService, {
+        dbSettingKey: 'other.tenant',
+      }),
+    ).toThrow(/dbSettingKey mismatch.*custom\.tenant.*other\.tenant/i);
+    expect(capturedFactory).toBeNull();
+  });
+
+  it('should accept an explicit dbSettingKey that matches the canonical value', () => {
+    const configuredService = new TenancyService(context, undefined, {
+      dbSettingKey: 'custom.tenant',
+    });
+
+    expect(() =>
+      createPrismaTenancyExtension(configuredService, {
+        dbSettingKey: 'custom.tenant',
+      }),
+    ).not.toThrow();
+    expect(capturedFactory).not.toBeNull();
+  });
+
+  it('should preserve standalone explicit custom dbSettingKey compatibility', async () => {
+    const { mockPrisma, mockTransaction, mockExecuteRaw } = buildMockPrisma();
+    const capturedSetConfigArgs: any[] = [];
+
+    createPrismaTenancyExtension(service, {
+      dbSettingKey: 'standalone.tenant',
+    });
+    const extensionConfig = capturedFactory!(mockPrisma);
+    const handler = extensionConfig.query.$allModels.$allOperations;
+
+    mockExecuteRaw.mockImplementation((...args: any[]) => {
+      capturedSetConfigArgs.push(args);
+      return Promise.resolve(1);
+    });
+    mockTransaction.mockImplementation(async (queries: any[]) =>
+      Promise.all(queries),
+    );
+
+    await context.run(
+      '550e8400-e29b-41d4-a716-446655440000',
+      () => handler({
+        model: 'TestModel',
+        operation: 'findMany',
+        args: {},
+        query: jest.fn().mockResolvedValue([]),
+      }),
+    );
+
+    expect(capturedSetConfigArgs[0].slice(1)).toEqual([
+      'standalone.tenant',
+      '550e8400-e29b-41d4-a716-446655440000',
+    ]);
+  });
+
+  it('should reject an invalid dbSettingKey before defining an extension', () => {
+    expect(() =>
+      createPrismaTenancyExtension(service, {
+        dbSettingKey: 'server_version',
+      }),
+    ).toThrow('Invalid database setting key');
+    expect(capturedFactory).toBeNull();
   });
 
   it('should return second element of transaction result', async () => {

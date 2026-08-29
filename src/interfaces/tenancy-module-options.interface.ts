@@ -26,6 +26,12 @@ export interface TenancyModuleOptions {
    * ```
    */
   tenantExtractor: string | TenantExtractor;
+  /**
+   * Canonical PostgreSQL custom setting used by Prisma RLS integration.
+   * The extension and `tenancyTransaction()` inherit this value through
+   * `TenancyService`; explicit per-call values must match it.
+   * @default 'app.current_tenant'
+   */
   dbSettingKey?: string;
   validateTenantId?: (tenantId: string) => boolean | Promise<boolean>;
   /**

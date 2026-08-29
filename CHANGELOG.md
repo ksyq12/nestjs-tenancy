@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Made `TenancyModule`'s validated `dbSettingKey` the canonical runtime setting inherited by the Prisma extension and `tenancyTransaction()`. Explicit identical values remain compatible, while mismatches now fail before database work starts.
+- Updated CLI scaffolding to emit a custom database setting key once in module configuration while sharing the same default and validator across runtime, `init`, `check`, and `doctor`.
+
 ## [0.15.0] - 2026-08-24
 
 ### Added

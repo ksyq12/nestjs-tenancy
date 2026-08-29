@@ -15,6 +15,28 @@ describe('TenancyService', () => {
     service = new TenancyService(context, eventService);
   });
 
+  describe('database setting key', () => {
+    it('should default to the canonical setting outside Nest', () => {
+      expect(service.getDbSettingKey()).toBe('app.current_tenant');
+    });
+
+    it('should accept an explicit canonical setting outside Nest', () => {
+      const customService = new TenancyService(context, undefined, {
+        dbSettingKey: 'custom.tenant',
+      });
+
+      expect(customService.getDbSettingKey()).toBe('custom.tenant');
+    });
+
+    it('should reject an invalid canonical setting', () => {
+      expect(() =>
+        new TenancyService(context, undefined, {
+          dbSettingKey: 'invalid-key',
+        }),
+      ).toThrow('Invalid database setting key');
+    });
+  });
+
   describe('getCurrentTenant', () => {
     it('should return null when no tenant is set', () => {
       expect(service.getCurrentTenant()).toBeNull();
