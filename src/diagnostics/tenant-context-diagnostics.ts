@@ -20,6 +20,21 @@ export interface MissingTenantContextDiagnostic {
   resource?: string;
 }
 
+/**
+ * Low-cardinality metadata for an inbound tenant ID rejected by an explicit
+ * RPC validator. The interceptor does not copy the rejected value here;
+ * callers must keep `resource` stable and non-sensitive.
+ */
+export interface InvalidTenantContextDiagnostic {
+  transport: 'bull' | 'kafka' | 'grpc';
+  operation: 'consume';
+  resource?: string;
+}
+
+type TenantContextTelemetryReporter =
+  Pick<TenancyTelemetryService, 'recordMissingContext'> &
+  Partial<Pick<TenancyTelemetryService, 'recordInvalidContext'>>;
+
 export interface TenantContextDiagnosticsOptions {
   /** Existing silent/pass-through behavior remains the default. */
   policy?: MissingTenantContextPolicy;
@@ -28,10 +43,12 @@ export interface TenantContextDiagnosticsOptions {
 }
 
 /**
- * Applies one missing-context policy across non-HTTP transports and resources.
+ * Reports missing or invalid tenant context across non-HTTP transports and resources.
  *
  * `ignore` preserves the pre-diagnostics behavior. `warn` reports and continues,
- * while `throw` reports and then raises `TenantContextMissingError`.
+ * while `throw` reports and then raises `TenantContextMissingError`. That policy
+ * applies only to missing context; invalid-ID reporting is observational because
+ * the interceptor always rejects a validator result of `false`.
  */
 export class TenantContextDiagnostics {
   private readonly logger = new Logger(TenantContextDiagnostics.name);
@@ -40,7 +57,7 @@ export class TenantContextDiagnostics {
   constructor(
     options: TenantContextDiagnosticsOptions = {},
     private readonly eventService?: Pick<TenancyEventService, 'emit'>,
-    private readonly telemetryService?: Pick<TenancyTelemetryService, 'recordMissingContext'>,
+    private readonly telemetryService?: TenantContextTelemetryReporter,
   ) {
     this.policy = options.policy ?? 'ignore';
     this.onMissing = options.onMissing;
@@ -68,6 +85,22 @@ export class TenantContextDiagnostics {
     }
 
     throw new TenantContextMissingError(message);
+  }
+
+  /**
+   * Records a rejected inbound tenant ID without exposing the rejected value.
+   * Validation rejection is independent of the missing-context policy; the
+   * interceptor remains responsible for failing the message.
+   */
+  reportInvalid(diagnostic: InvalidTenantContextDiagnostic): void {
+    this.invokeReporter(
+      'Invalid-context event reporter failed',
+      () => this.eventService?.emit(TenancyEvents.CONTEXT_INVALID, diagnostic),
+    );
+    this.invokeReporter(
+      'Invalid-context telemetry reporter failed',
+      () => this.telemetryService?.recordInvalidContext?.(diagnostic),
+    );
   }
 
   private invokeHook(diagnostic: MissingTenantContextDiagnostic): void {

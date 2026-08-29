@@ -103,4 +103,62 @@ describe('TenantContextDiagnostics', () => {
       expect.stringContaining('telemetry failed'),
     );
   });
+
+  it('reports invalid inbound context independently of the missing-context policy', () => {
+    const eventService = { emit: jest.fn() };
+    const telemetryService = {
+      recordMissingContext: jest.fn(),
+      recordInvalidContext: jest.fn(),
+    };
+    const diagnostics = new TenantContextDiagnostics(
+      { policy: 'ignore' },
+      eventService,
+      telemetryService,
+    );
+    const invalidDiagnostic = {
+      transport: 'kafka' as const,
+      operation: 'consume' as const,
+      resource: 'orders',
+    };
+
+    diagnostics.reportInvalid(invalidDiagnostic);
+
+    expect(eventService.emit).toHaveBeenCalledWith(
+      TenancyEvents.CONTEXT_INVALID,
+      invalidDiagnostic,
+    );
+    expect(telemetryService.recordInvalidContext).toHaveBeenCalledWith(
+      invalidDiagnostic,
+    );
+    expect(Object.keys(invalidDiagnostic)).toEqual([
+      'transport',
+      'operation',
+      'resource',
+    ]);
+  });
+
+  it('contains invalid-context reporter failures', () => {
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const diagnostics = new TenantContextDiagnostics(
+      {},
+      { emit: () => { throw new Error('event failed'); } } as any,
+      {
+        recordMissingContext: jest.fn(),
+        recordInvalidContext: () => { throw new Error('telemetry failed'); },
+      },
+    );
+
+    expect(() => diagnostics.reportInvalid({
+      transport: 'grpc',
+      operation: 'consume',
+    })).not.toThrow();
+    expect(error).toHaveBeenCalledWith(
+      'Invalid-context event reporter failed',
+      expect.stringContaining('event failed'),
+    );
+    expect(error).toHaveBeenCalledWith(
+      'Invalid-context telemetry reporter failed',
+      expect.stringContaining('telemetry failed'),
+    );
+  });
 });

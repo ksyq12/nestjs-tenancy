@@ -34,7 +34,7 @@ One line of code. Automatic tenant isolation.
 - **Multi-schema support** — `@@schema()` directives generate schema-qualified SQL (e.g., `"auth"."users"`)
 - **ccTLD-aware subdomain extraction** — accurate parsing for `.co.uk`, `.co.jp`, `.com.au`, etc.
 - **Framework-agnostic** — public API uses `TenancyRequest` / `TenancyResponse` instead of Express types. Works with Express, Fastify, and raw Node.js HTTP
-- **SQL injection safe** — `set_config()` with bind parameters, plus UUID validation by default
+- **SQL injection safe** — `set_config()` with bind parameters, plus HTTP UUID-like validation by default and explicit RPC validation during 0.x
 - **NestJS 10 & 11** compatible, **Prisma 7 first-class** with a Prisma 6 compatibility lane
 
 ## Performance
@@ -338,7 +338,8 @@ to that tenant via RLS. Raw operations are outside this automatic contract.
 TenancyModule.forRoot({
   tenantExtractor: 'X-Tenant-Id',           // header name (string)
   dbSettingKey: 'app.current_tenant',        // PostgreSQL setting (default)
-  validateTenantId: (id) => UUID_REGEX.test(id), // sync or async (default: UUID)
+  // Optional sync/async override; omitted HTTP validation uses a UUID-like format
+  validateTenantId: (id) => /^org_[a-z0-9-]+$/.test(id),
 })
 
 // Async with factory
@@ -644,6 +645,8 @@ TenancyModule.forRoot({
 | Prisma query without tenant context (`failClosed`, default) | Throws | `TenancyContextRequiredError` |
 | WebSocket context | — | `TenancyGuard` skips it; no built-in restoration or enforcement |
 | Kafka, Bull, or gRPC context | Policy-dependent | Configure `TenantContextInterceptor`; the HTTP guard does not handle RPC |
+| Explicit Kafka, Bull, or gRPC validator returns/resolves `false` | Throws | `BadRequestException: Invalid tenant ID format`; handler is not invoked |
+| Explicit Kafka, Bull, or gRPC validator throws/rejects | Propagates | Original validator error; handler is not invoked |
 
 ## Fail-Closed Mode
 
@@ -719,7 +722,7 @@ class TenantLogger {
 }
 ```
 
-Events: `tenant.resolved`, `tenant.not_found`, `tenant.extraction_failed`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`, `tenant.context_missing`.
+Events: `tenant.resolved`, `tenant.not_found`, `tenant.extraction_failed`, `tenant.validation_failed`, `tenant.context_bypassed`, `tenant.cross_check_failed`, `tenant.context_missing`, `tenant.context_invalid`.
 
 If `@nestjs/event-emitter` is not installed, events are silently skipped — no errors.
 
@@ -749,6 +752,8 @@ TenancyModule.forRoot({
 ```
 
 If the cross-check extractor returns `null` (e.g., no JWT present), validation is skipped by default — unauthenticated endpoints work normally. Set `required: true` to reject requests when the cross-check source is missing, enforcing that every request must have a verifiable secondary source. On mismatch, `tenant.cross_check_failed` event is emitted.
+
+> **HTTP-only contract:** `crossCheck` and `onTenantResolved` are executed by `TenantMiddleware`. `TenantContextInterceptor` does not apply them to RPC messages, and they do not replace RPC producer authentication or authorization.
 
 > **v0.12.0 migration:** The flat `crossCheckExtractor` / `onCrossCheckFailed` fields were removed. Use `crossCheck: { extractor, onFailed, required }`.
 
@@ -901,11 +906,25 @@ const tenantId = propagator.extract(call.metadata);
 `TenantContextInterceptor` automatically restores tenant context from incoming microservice messages. It wraps handler execution in `TenancyContext.run()`.
 
 ```typescript
-import { TenantContextInterceptor, TenancyContext } from '@nestarc/tenancy';
+import {
+  TenantContextDiagnostics,
+  TenantContextInterceptor,
+  TenancyContext,
+  type TenantIdValidator,
+} from '@nestarc/tenancy';
 
-// Recommended: specify transport explicitly to avoid duck-typing ambiguity
+const validateTenantId: TenantIdValidator = (tenantId) =>
+  /^org_[a-z0-9-]+$/.test(tenantId);
+const diagnostics = app.get(TenantContextDiagnostics);
+
+// Specify the transport explicitly to avoid duck-typing ambiguity.
 app.useGlobalInterceptors(
-  new TenantContextInterceptor(new TenancyContext(), { transport: 'kafka' }),
+  new TenantContextInterceptor(new TenancyContext(), {
+    transport: 'kafka',
+    validateTenantId,
+    diagnostics,
+    resource: 'orders',
+  }),
 );
 ```
 
@@ -919,6 +938,19 @@ Supported transports: `'kafka'` | `'bull'` | `'grpc'`.
 | `kafkaHeaderName` | `string` | `'X-Tenant-Id'` | Kafka message header name |
 | `bullDataKey` | `string` | `'__tenantId'` | Bull job data key |
 | `grpcMetadataKey` | `string` | `'x-tenant-id'` | gRPC metadata key |
+| `validateTenantId` | `TenantIdValidator` | unset during 0.x | Optional sync/async validator run before tenant context and handler execution |
+| `diagnostics` | `TenantContextDiagnostics` | none | Module-backed missing/invalid-context event and telemetry reporting |
+| `resource` | `string` | none | Stable, low-cardinality, non-sensitive topic, queue, service, or handler name |
+
+> **0.x compatibility:** HTTP extraction uses built-in UUID-like validation when `TenancyModuleOptions.validateTenantId` is omitted. RPC restoration historically accepted any non-empty string, so the interceptor preserves that default throughout 0.x. Pass `validateTenantId` explicitly now. The planned v1.0.0 default is the same UUID-like validation as HTTP; custom identifiers will continue to require a custom validator. See the [compatibility ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-29-rpc-tenant-validation-compatibility-adr.md).
+
+When an explicit RPC validator returns `false`, the handler is not invoked and the interceptor rejects with `BadRequestException('Invalid tenant ID format')`. A supplied module-resolved `TenantContextDiagnostics` reports the exported `InvalidTenantContextDiagnostic` payload (`transport`, `operation: 'consume'`, and optional stable `resource`) to the optional event and telemetry integrations. When configured, this emits `tenant.context_invalid`, adds an active-span event of the same name, and increments `nestarc.tenancy.invalid_context` with `tenant.transport`, `tenant.operation`, and optional `tenant.resource` attributes. The interceptor never copies the rejected ID or raw carrier contents into that payload. Keep the caller-supplied `resource` non-sensitive; do not place tenant/user IDs or secrets in it. Invalid input is independent of `missingContext.policy` and always rejects.
+
+#### RPC Trust Boundary
+
+RPC carrier values are tenant claims, not authenticated identities. `TenantContextInterceptor` does not authenticate producers, verify message signatures, configure broker/channel security, or authorize a producer for the claimed tenant. The HTTP `crossCheck` and `onTenantResolved` contracts are not automatically applied to RPC messages.
+
+Authenticate the producer or channel and authorize that principal for the claimed tenant before tenant-scoped handler work. `validateTenantId` provides format or allow-list validation only; successful validation and context restoration are not authorization.
 
 ### Non-HTTP Missing-Context Diagnostics
 
@@ -947,7 +979,7 @@ const propagator = new BullTenantPropagator(new TenancyContext(), {
 });
 ```
 
-`warn` and `throw` both emit `tenant.context_missing`, add a `tenant.context_missing` event to the active OpenTelemetry span, and increment `nestarc.tenancy.missing_context`. Telemetry attributes are `tenant.transport`, `tenant.operation`, and optional `tenant.resource`. The `throw` policy raises `TenantContextMissingError` after reporting. HTTP extraction is intentionally outside this policy because middleware and `TenancyGuard` already define its fail-closed contract.
+`warn` and `throw` both emit `tenant.context_missing`, add a `tenant.context_missing` event to the active OpenTelemetry span, and increment `nestarc.tenancy.missing_context`. Telemetry attributes are `tenant.transport`, `tenant.operation`, and optional `tenant.resource`. The `throw` policy raises `TenantContextMissingError` after reporting. HTTP extraction is intentionally outside this policy because middleware and `TenancyGuard` already define its fail-closed contract. An RPC value rejected by an explicit validator uses the separate, always-rejecting `tenant.context_invalid` path described above; it is not treated as missing.
 
 The same diagnostics object can be supplied to `TenantContextInterceptor`, `TenantCacheInterceptor`, `TenantResourceKey`, and `TenantSearch`. `TenantResourceKey` creates collision-safe Redis/search keys, while `TenantSearch` is a vendor-neutral adapter boundary that never invokes the adapter without tenant scope:
 
@@ -1096,9 +1128,9 @@ try {
 
 ## Security
 
-- **SQL Injection**: The Prisma extension uses `set_config()` with bind parameters via `$executeRaw` tagged template. This eliminates SQL injection risk at the database layer. Additionally, tenant IDs are validated by the middleware (UUID format by default).
+- **SQL Injection**: The Prisma extension uses `set_config()` with bind parameters via `$executeRaw` tagged template. This eliminates SQL injection risk at the database layer. HTTP tenant IDs are validated by the middleware (UUID-like format by default); RPC validation is explicit during 0.x.
 - **Transaction-scoped**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL` and is scoped to the database transaction. The supported PgBouncer transaction-mode matrix verifies A → B → no-context isolation on reused physical backends.
-- **Custom validators**: If your tenant IDs are not UUIDs, provide a `validateTenantId` function that rejects any unsafe input.
+- **Custom validators**: Reuse a `TenantIdValidator` in HTTP module options and RPC interceptor options when tenant IDs are not UUIDs or require an allow-list. Format validation does not authenticate or authorize the caller or producer.
 
 ### RLS Operational Notes
 
@@ -1131,15 +1163,15 @@ CI and release workflows run this command against the pinned Prisma 6.19.3 and 7
 
 ### Security Considerations
 
-**Tenant ID is client-supplied by default.** The built-in extractors (Header, Subdomain, Path) read tenant identifiers directly from the request without verifying the caller's authorization to access that tenant.
+**Tenant ID is caller-supplied by default.** HTTP extractors read request data, and RPC restoration reads Kafka headers, Bull job data, or gRPC metadata. Neither source proves that the caller or producer may access the claimed tenant.
 
-For production use, you **must** add a trust boundary — verify that the authenticated user belongs to the claimed tenant. Options:
+For production use, you **must** add a trust boundary — verify that the authenticated caller or producer belongs to the claimed tenant. HTTP options include:
 
 1. **Use `JwtClaimTenantExtractor`** with a pre-validated JWT (tenant ID embedded by your auth server)
 2. **Add validation in `onTenantResolved` hook** — check the user's tenant membership
 3. **Use authentication middleware** before the tenancy middleware to establish trust
 
-Without a trust boundary, any client can access any tenant's data by changing the header value.
+For RPC, authenticate the broker/channel or message producer and perform principal-to-tenant authorization before tenant-scoped work. Tenant ID format validation, successful context restoration, broker delivery, and PostgreSQL RLS do not perform that authorization. Without this boundary, a caller or producer that can choose the carrier value can cause work to run under another tenant.
 
 ## How It Works
 

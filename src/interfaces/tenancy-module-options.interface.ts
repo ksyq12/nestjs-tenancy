@@ -3,6 +3,7 @@ import type { ModuleMetadata } from '@nestjs/common/interfaces';
 import { TenancyRequest, TenancyResponse } from './tenancy-request.interface';
 import { TenantExtractor } from './tenant-extractor.interface';
 import type { TenantContextDiagnosticsOptions } from '../diagnostics/tenant-context-diagnostics';
+import type { TenantIdValidator } from './tenant-id-validator.interface';
 
 export interface TelemetryOptions {
   /** Span attribute key for tenant ID. @default 'tenant.id' */
@@ -31,9 +32,13 @@ export interface TenancyModuleOptions {
    * The extension and `tenancyTransaction()` inherit this value through
    * `TenancyService`; explicit per-call values must match it.
    * @default 'app.current_tenant'
-   */
+  */
   dbSettingKey?: string;
-  validateTenantId?: (tenantId: string) => boolean | Promise<boolean>;
+  /**
+   * Validates an extracted HTTP tenant ID before context is established.
+   * Defaults to the built-in dashed UUID-like validator when omitted.
+   */
+  validateTenantId?: TenantIdValidator;
   /**
    * Called after a tenant ID is successfully extracted and validated.
    * Runs inside `TenancyContext.run()`, so `getCurrentTenant()` is available.

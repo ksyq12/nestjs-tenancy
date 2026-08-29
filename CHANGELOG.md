@@ -10,10 +10,16 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - Raised the supported Node.js runtime contract from `>=20.19.0` to `^22.13.0 || ^24.0.0`, removed the EOL Node.js 20 CI lane, and aligned development types with Node.js 22. This pre-1.0 breaking change is planned for 0.16.0; Node.js 20 consumers must upgrade their runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked sibling-package compatibility evidence is complete.
 
+### Added
+
+- Added the exported `TenantIdValidator` contract shared by HTTP module configuration and `TenantContextInterceptor`, with explicit sync or async validation for inbound Kafka, Bull, and gRPC tenant identifiers before context restoration and handler execution.
+- Added RPC invalid-context diagnostics through `tenant.context_invalid` and `nestarc.tenancy.invalid_context`; the interceptor does not copy the rejected ID or raw carrier data and reports only transport, operation, and optional caller-supplied stable resource metadata.
+
 ### Changed
 
 - Made `TenancyModule`'s validated `dbSettingKey` the canonical runtime setting inherited by the Prisma extension and `tenancyTransaction()`. Explicit identical values remain compatible, while mismatches now fail before database work starts.
 - Updated CLI scaffolding to emit a custom database setting key once in module configuration while sharing the same default and validator across runtime, `init`, `check`, and `doctor`.
+- Preserved the existing non-empty RPC tenant identifier behavior when no interceptor validator is supplied during 0.x. The planned v1.0.0 default is the same UUID-like validation used by HTTP; non-UUID consumers can preserve their contract with an explicit custom validator.
 
 ### Fixed
 
@@ -23,6 +29,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - Replaced the diagonal in-repository NestJS/Prisma compatibility override with isolated, strict-install packed-tarball consumers covering NestJS 10/11 × Prisma 6/7, including supported lower-bound and repository-locked optional cache/event profiles.
 - Added an isolated actual-tarball consumer smoke for the root, cache, and testing runtime/declaration exports; the cache-free root import; and the installed CLI bin, shebang, help, and invalid-invocation exit contract.
+- Added Kafka string/Buffer, gRPC metadata, and Bull data validator coverage for valid, invalid, missing, async, cancellation, context isolation, and redacted diagnostics paths.
 
 ### Documentation
 
@@ -30,6 +37,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Defined the latest-minor-only security support policy for the current 0.15.x line and separated the already-published Node.js contract, the Unreleased 0.16.0 contract, and the NestJS/Prisma combinations actually exercised by CI.
 - Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, and the 0.16.0 compatibility-evidence release hold.
 - Corrected the private vulnerability reporting path and centralized the current raw Prisma query, WebSocket, and managed-pooler guarantee boundaries.
+- Added the inbound RPC validation compatibility ADR and clarified that tenant propagation, format validation, and context restoration do not authenticate message producers or authorize access to the claimed tenant.
 
 ### Current Deprecation Inventory
 

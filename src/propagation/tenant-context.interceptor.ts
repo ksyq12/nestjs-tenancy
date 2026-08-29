@@ -1,20 +1,27 @@
 import {
+  BadRequestException,
   CallHandler,
   ExecutionContext,
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
-import { Observable, Subscriber } from 'rxjs';
+import { defer, mergeMap, Observable, Subscriber } from 'rxjs';
 import { runInEmptyTenancyContext, TenancyContext } from '../services/tenancy-context';
 import { DEFAULT_PROPAGATION_HEADER, DEFAULT_BULL_DATA_KEY, DEFAULT_GRPC_METADATA_KEY } from '../tenancy.constants';
 import type { TenantContextDiagnostics } from '../diagnostics/tenant-context-diagnostics';
+import type { TenantIdValidator } from '../interfaces/tenant-id-validator.interface';
 
 type RpcTransport = 'kafka' | 'bull' | 'grpc';
 
 interface TenantContextInterceptorDiagnosticOptions {
   diagnostics?: TenantContextDiagnostics;
-  /** Stable topic, queue, service, or handler name included in diagnostics. */
+  /** Stable, non-sensitive topic, queue, service, or handler name included in diagnostics. */
   resource?: string;
+  /**
+   * Opt-in validation applied after extraction and before tenant context is set.
+   * Omission preserves the pre-1.0 arbitrary non-empty string contract.
+   */
+  validateTenantId?: TenantIdValidator;
 }
 
 /**
@@ -44,6 +51,12 @@ export type TenantContextInterceptorOptions =
  *
  * For best results, set the `transport` option explicitly to avoid duck-typing
  * ambiguity when multiple RPC transports share similar context shapes.
+ * During 0.x, tenant ID validation is opt-in through `validateTenantId`; omitting
+ * it preserves the historical arbitrary non-empty string behavior.
+ *
+ * Extraction and format validation do not authenticate a message producer or
+ * authorize it for the claimed tenant. Establish that trust boundary before
+ * tenant-scoped handler work.
  *
  * @example
  * ```typescript
@@ -66,6 +79,7 @@ export class TenantContextInterceptor implements NestInterceptor {
   private readonly transport?: RpcTransport;
   private readonly diagnostics?: TenantContextDiagnostics;
   private readonly resource?: string;
+  private readonly validateTenantId?: TenantIdValidator;
 
   constructor(
     private readonly context: TenancyContext,
@@ -77,6 +91,7 @@ export class TenantContextInterceptor implements NestInterceptor {
       kafkaHeaderName?: string; bullDataKey?: string;
       grpcMetadataKey?: string; transport?: RpcTransport;
       diagnostics?: TenantContextDiagnostics; resource?: string;
+      validateTenantId?: TenantIdValidator;
     };
     this.kafkaHeaderName = opts.kafkaHeaderName ?? DEFAULT_PROPAGATION_HEADER;
     this.bullDataKey = opts.bullDataKey ?? DEFAULT_BULL_DATA_KEY;
@@ -84,6 +99,7 @@ export class TenantContextInterceptor implements NestInterceptor {
     this.transport = opts.transport;
     this.diagnostics = opts.diagnostics;
     this.resource = opts.resource;
+    this.validateTenantId = opts.validateTenantId;
   }
 
   intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown> {
@@ -109,7 +125,43 @@ export class TenantContextInterceptor implements NestInterceptor {
       return this.subscribeInContext(null, next);
     }
 
+    if (this.validateTenantId) {
+      return this.validateAndSubscribe(
+        tenantId,
+        this.transport ?? this.detectTransport(executionContext),
+        next,
+      );
+    }
+
     return this.subscribeInContext(tenantId, next);
+  }
+
+  private validateAndSubscribe(
+    tenantId: string,
+    transport: RpcTransport | null,
+    next: CallHandler,
+  ): Observable<unknown> {
+    return defer(() => Promise.resolve(
+      runInEmptyTenancyContext(() => this.validateTenantId!(tenantId)),
+    )).pipe(
+      mergeMap((isValid) => {
+        if (!isValid) {
+          if (transport && this.diagnostics) {
+            runInEmptyTenancyContext(() => {
+              this.diagnostics?.reportInvalid({
+                transport,
+                operation: 'consume',
+                ...(this.resource ? { resource: this.resource } : {}),
+              });
+            });
+          }
+
+          throw new BadRequestException('Invalid tenant ID format');
+        }
+
+        return this.subscribeInContext(tenantId, next);
+      }),
+    );
   }
 
   private subscribeInContext(tenantId: string | null, next: CallHandler): Observable<unknown> {

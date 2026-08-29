@@ -1,7 +1,13 @@
 import 'reflect-metadata';
 import {
   TenancyContext,
+  TenantContextDiagnostics,
+  TenantContextInterceptor,
+  TenancyEvents,
   TenancyService,
+  type InvalidTenantContextDiagnostic,
+  type TenantContextInterceptorOptions,
+  type TenantIdValidator,
   type TenancyModuleOptions,
 } from '@nestarc/tenancy';
 import {
@@ -17,8 +23,23 @@ import {
   type TestTenancyModuleOptions,
 } from '@nestarc/tenancy/testing';
 
+const validateTenantId: TenantIdValidator =
+  (tenantId) => tenantId.startsWith('tenant-');
 const moduleOptions: TenancyModuleOptions = {
   tenantExtractor: 'x-tenant-id',
+  validateTenantId,
+};
+const diagnostics = new TenantContextDiagnostics();
+const interceptorOptions: TenantContextInterceptorOptions = {
+  transport: 'kafka',
+  validateTenantId,
+  diagnostics,
+  resource: 'package-smoke',
+};
+const invalidDiagnostic: InvalidTenantContextDiagnostic = {
+  transport: 'kafka',
+  operation: 'consume',
+  resource: 'package-smoke',
 };
 const testModuleOptions: TestTenancyModuleOptions = moduleOptions;
 const cacheOptions: TenantCacheInterceptorOptions = {
@@ -46,6 +67,14 @@ async function main(): Promise<void> {
   }
 
   const context = new TenancyContext();
+  const interceptor = new TenantContextInterceptor(context, interceptorOptions);
+  if (
+    typeof interceptor.intercept !== 'function' ||
+    invalidDiagnostic.transport !== 'kafka' ||
+    TenancyEvents.CONTEXT_INVALID !== 'tenant.context_invalid'
+  ) {
+    throw new Error('RPC validator declaration contract was not preserved');
+  }
   const service = new TenancyService(context);
   const observedTenant = await withTenant(
     'tenant-package-smoke',

@@ -56,11 +56,13 @@ import type {
   TenantContextCarrier,
   TenantContextInterceptorOptions,
   TenantContextDiagnosticsOptions,
+  InvalidTenantContextDiagnostic,
   MissingTenantContextDiagnostic,
   MissingTenantContextPolicy,
   TenantCrossCheckFailedEvent,
   TenantExtractionFailedEvent,
   TenantExtractor,
+  TenantIdValidator,
   TenantNotFoundEvent,
   TenantPropagator,
   TenantResolvedEvent,
@@ -155,6 +157,7 @@ describe('public API barrels', () => {
           RESOLVED: 'tenant.resolved',
           NOT_FOUND: 'tenant.not_found',
           CONTEXT_MISSING: 'tenant.context_missing',
+          CONTEXT_INVALID: 'tenant.context_invalid',
         }),
       }),
     );
@@ -234,10 +237,12 @@ describe('public API barrels', () => {
       spanAttributeKey: 'tenant.id',
       createSpans: true,
     };
+    const tenantIdValidator: TenantIdValidator =
+      (tenantId) => tenantId.length > 0;
     const moduleOptions: TenancyModuleOptions = {
       tenantExtractor: extractor,
       dbSettingKey: 'app.current_tenant',
-      validateTenantId: (tenantId) => tenantId.length > 0,
+      validateTenantId: tenantIdValidator,
       crossCheck: {
         extractor,
         onFailed: 'log',
@@ -359,6 +364,11 @@ describe('public API barrels', () => {
         operation: 'key',
         resource: 'cache',
       },
+      [TenancyEvents.CONTEXT_INVALID]: {
+        transport: 'kafka',
+        operation: 'consume',
+        resource: 'orders',
+      },
     };
 
     const request: TenancyRequest = {
@@ -379,6 +389,7 @@ describe('public API barrels', () => {
     const interceptorOptions: TenantContextInterceptorOptions = {
       transport: 'kafka',
       kafkaHeaderName: 'X-Tenant-Id',
+      validateTenantId: tenantIdValidator,
     };
     const missingPolicy: MissingTenantContextPolicy = 'warn';
     const missingOptions: TenantContextDiagnosticsOptions = {
@@ -388,6 +399,11 @@ describe('public API barrels', () => {
       transport: 'redis',
       operation: 'key',
       resource: 'cache',
+    };
+    const invalidDiagnostic: InvalidTenantContextDiagnostic = {
+      transport: 'kafka',
+      operation: 'consume',
+      resource: 'orders',
     };
     const resourceKeyOptions: TenantResourceKeyOptions = {
       transport: 'redis',
@@ -434,6 +450,7 @@ describe('public API barrels', () => {
       interceptorOptions,
       missingOptions,
       missingDiagnostic,
+      invalidDiagnostic,
       resourceKeyOptions,
       searchScope,
       searchOptions,
@@ -465,6 +482,7 @@ describe('public API barrels', () => {
       interceptorOptions,
       missingOptions,
       missingDiagnostic,
+      invalidDiagnostic,
       resourceKeyOptions,
       searchScope,
       searchOptions,

@@ -9,6 +9,7 @@ import type { NestMiddleware } from '@nestjs/common';
 import type { TenancyRequest, TenancyResponse } from '../interfaces/tenancy-request.interface';
 import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import type { TenantExtractor } from '../interfaces/tenant-extractor.interface';
+import type { TenantIdValidator } from '../interfaces/tenant-id-validator.interface';
 import { runInEmptyTenancyContext, TenancyContext } from '../services/tenancy-context';
 import { TenancyEventService } from '../events/tenancy-event.service';
 import { summarizeTenancyRequest, TenancyEvents } from '../events/tenancy-events';
@@ -19,7 +20,7 @@ import { TENANCY_MODULE_OPTIONS, UUID_REGEX } from '../tenancy.constants';
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
   private readonly extractor: TenantExtractor;
-  private readonly validate: (id: string) => boolean | Promise<boolean>;
+  private readonly validate: TenantIdValidator;
   private readonly crossChecker: TenantExtractor | null;
   private readonly onCrossCheckFailed: 'reject' | 'log';
   private readonly crossCheckRequired: boolean;

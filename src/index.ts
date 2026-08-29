@@ -11,6 +11,7 @@ export type {
 // Non-HTTP diagnostics
 export { TenantContextDiagnostics } from './diagnostics/tenant-context-diagnostics';
 export type {
+  InvalidTenantContextDiagnostic,
   MissingTenantContextDiagnostic,
   MissingTenantContextPolicy,
   TenantContextDiagnosticOperation,
@@ -27,6 +28,7 @@ export { BypassTenancy } from './decorators/bypass-tenancy.decorator';
 
 // Extractors
 export type { TenantExtractor } from './interfaces/tenant-extractor.interface';
+export type { TenantIdValidator } from './interfaces/tenant-id-validator.interface';
 export { HeaderTenantExtractor } from './extractors/header.extractor';
 export { SubdomainTenantExtractor } from './extractors/subdomain.extractor';
 export { JwtClaimTenantExtractor } from './extractors/jwt-claim.extractor';

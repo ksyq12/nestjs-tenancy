@@ -55,6 +55,7 @@ describe('TenancyTelemetryService', () => {
       (service as any).contextApi = mockContextApi;
       (service as any).tracer = mockTracer;
       (service as any).missingContextCounter = mockCounter;
+      (service as any).invalidContextCounter = mockCounter;
     });
 
     afterEach(() => jest.clearAllMocks());
@@ -93,6 +94,26 @@ describe('TenancyTelemetryService', () => {
         'tenant.transport': 'redis',
         'tenant.operation': 'key',
       });
+    });
+
+    it('records invalid-context telemetry without a tenant ID attribute', () => {
+      service.recordInvalidContext({
+        transport: 'kafka',
+        operation: 'consume',
+        resource: 'orders',
+      });
+
+      const attributes = {
+        'tenant.transport': 'kafka',
+        'tenant.operation': 'consume',
+        'tenant.resource': 'orders',
+      };
+      expect(mockSpan.addEvent).toHaveBeenCalledWith(
+        'tenant.context_invalid',
+        attributes,
+      );
+      expect(mockCounter.add).toHaveBeenCalledWith(1, attributes);
+      expect(attributes).not.toHaveProperty('tenant.id');
     });
 
     it('should use custom spanAttributeKey', () => {

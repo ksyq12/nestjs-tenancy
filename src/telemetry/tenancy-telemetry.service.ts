@@ -7,7 +7,10 @@ import type {
   TraceAPI,
   Tracer,
 } from '@opentelemetry/api';
-import type { MissingTenantContextDiagnostic } from '../diagnostics/tenant-context-diagnostics';
+import type {
+  InvalidTenantContextDiagnostic,
+  MissingTenantContextDiagnostic,
+} from '../diagnostics/tenant-context-diagnostics';
 import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import { TENANCY_MODULE_OPTIONS } from '../tenancy.constants';
 
@@ -27,6 +30,7 @@ export class TenancyTelemetryService implements OnModuleInit {
   private contextApi: Pick<ContextAPI, 'active' | 'with'> | null = null;
   private tracer: Tracer | null = null;
   private missingContextCounter: Counter | null = null;
+  private invalidContextCounter: Counter | null = null;
   private readonly spanAttributeKey: string;
   private readonly createSpans: boolean;
 
@@ -48,6 +52,11 @@ export class TenancyTelemetryService implements OnModuleInit {
         .getMeter('@nestarc/tenancy')
         .createCounter('nestarc.tenancy.missing_context', {
           description: 'Missing tenant context occurrences outside HTTP requests',
+        });
+      this.invalidContextCounter = api.metrics
+        .getMeter('@nestarc/tenancy')
+        .createCounter('nestarc.tenancy.invalid_context', {
+          description: 'Rejected inbound tenant identifiers outside HTTP requests',
         });
     } catch {
       // @opentelemetry/api not installed — telemetry silently skipped
@@ -76,6 +85,23 @@ export class TenancyTelemetryService implements OnModuleInit {
       attributes,
     );
     this.missingContextCounter?.add(1, attributes);
+  }
+
+  /** Record an RPC validation rejection without the rejected tenant value. */
+  recordInvalidContext(diagnostic: InvalidTenantContextDiagnostic): void {
+    const attributes: Attributes = {
+      'tenant.transport': diagnostic.transport,
+      'tenant.operation': diagnostic.operation,
+      ...(diagnostic.resource
+        ? { 'tenant.resource': diagnostic.resource }
+        : {}),
+    };
+
+    this.traceApi?.getActiveSpan()?.addEvent(
+      'tenant.context_invalid',
+      attributes,
+    );
+    this.invalidContextCounter?.add(1, attributes);
   }
 
   /** Start a custom span (only when createSpans is true). Returns null if disabled or OTel unavailable. */

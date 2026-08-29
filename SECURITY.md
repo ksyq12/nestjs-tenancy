@@ -45,7 +45,7 @@ This library handles tenant isolation at the database level via PostgreSQL Row L
 
 - **SQL injection prevention**: `set_config()` is called via `$executeRaw` tagged template with bind parameters — no string interpolation
 - **Transaction-scoped isolation**: `set_config(key, value, TRUE)` is equivalent to `SET LOCAL`, scoped to the batch transaction
-- **Tenant ID validation**: UUID format validation by default, customizable via `validateTenantId`
+- **Tenant ID validation**: HTTP uses UUID-like validation by default. RPC validation is an explicit `TenantContextInterceptorOptions.validateTenantId` opt-in throughout 0.x; both paths share the exported `TenantIdValidator` contract.
 - **JWT extractor**: Does **not** verify JWT signatures — requires prior authentication middleware (documented in JSDoc)
 
 ## Current Guarantee Boundaries
@@ -56,7 +56,17 @@ This library handles tenant isolation at the database level via PostgreSQL Row L
   that performs parameterized `set_config()` and the raw operation through the
   same transaction client and connection.
 - Inbound tenant restoration is covered for HTTP, Kafka, Bull, and gRPC.
-  WebSocket tenant enforcement/restoration is not currently provided.
+  Kafka/Bull/gRPC format validation is opt-in throughout 0.x, and omitted RPC
+  validation preserves the historical non-empty-string behavior. WebSocket
+  tenant enforcement/restoration is not currently provided.
+- Tenant extraction, propagation, format validation, and context restoration do
+  not authenticate a caller or message producer, verify message signatures, or
+  authorize the authenticated principal for the claimed tenant. Broker/channel
+  authentication, message integrity, and principal-to-tenant authorization are
+  application and deployment responsibilities. The interceptor copies only
+  transport, operation, and an optional caller-supplied stable resource into
+  invalid RPC diagnostics; the resource must not contain tenant/user IDs or
+  secrets.
 - The verified pooler contract is the repository's pinned PgBouncer transaction
   mode configuration. Prisma Data Proxy, managed poolers, and production-specific
   pooler settings remain outside the repository support guarantee. Deployment

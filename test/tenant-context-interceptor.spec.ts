@@ -1,8 +1,10 @@
-import { CallHandler, ExecutionContext } from '@nestjs/common';
-import { Observable, of, Subscription, take } from 'rxjs';
+import { BadRequestException, CallHandler, ExecutionContext } from '@nestjs/common';
+import { lastValueFrom, Observable, of, Subscription, take } from 'rxjs';
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenantContextInterceptor } from '../src/propagation/tenant-context.interceptor';
 import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
+import type { TenantIdValidator } from '../src/interfaces/tenant-id-validator.interface';
+import type { TenantContextInterceptorOptions } from '../src/propagation/tenant-context.interceptor';
 
 function createMockCallHandler(returnValue: unknown = 'result'): CallHandler {
   return { handle: () => of(returnValue) };
@@ -296,6 +298,306 @@ describe('TenantContextInterceptor', () => {
         { handle },
       )).toThrow('Tenant context is missing during kafka.consume');
       expect(handle).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('tenant ID validation', () => {
+    type ValidationCase = {
+      name: string;
+      tenantId: string;
+      executionContext: () => ExecutionContext;
+      createInterceptor: (
+        validateTenantId: TenantIdValidator,
+        diagnostics?: TenantContextDiagnostics,
+      ) => TenantContextInterceptor;
+    };
+
+    const carrierCases: ValidationCase[] = [
+      {
+        name: 'Kafka string',
+        tenantId: 'org_kafka_string',
+        executionContext: () => createKafkaContext({
+          'X-Tenant-Id': 'org_kafka_string',
+        }),
+        createInterceptor: (validateTenantId, diagnostics) =>
+          new TenantContextInterceptor(context, {
+            transport: 'kafka', validateTenantId, diagnostics,
+          }),
+      },
+      {
+        name: 'Kafka Buffer',
+        tenantId: 'org_kafka_buffer',
+        executionContext: () => createKafkaContext({
+          'X-Tenant-Id': Buffer.from('org_kafka_buffer'),
+        }),
+        createInterceptor: (validateTenantId, diagnostics) =>
+          new TenantContextInterceptor(context, {
+            transport: 'kafka', validateTenantId, diagnostics,
+          }),
+      },
+      {
+        name: 'gRPC string metadata',
+        tenantId: 'org_grpc_string',
+        executionContext: () => createGrpcContext(new Map([
+          ['x-tenant-id', ['org_grpc_string']],
+        ])),
+        createInterceptor: (validateTenantId, diagnostics) =>
+          new TenantContextInterceptor(context, {
+            transport: 'grpc', validateTenantId, diagnostics,
+          }),
+      },
+      {
+        name: 'gRPC Buffer metadata',
+        tenantId: 'org_grpc_buffer',
+        executionContext: () => createGrpcContext(new Map([
+          ['x-tenant-id', [Buffer.from('org_grpc_buffer')]],
+        ])),
+        createInterceptor: (validateTenantId, diagnostics) =>
+          new TenantContextInterceptor(context, {
+            transport: 'grpc', validateTenantId, diagnostics,
+          }),
+      },
+      {
+        name: 'Bull data',
+        tenantId: 'org_bull',
+        executionContext: () => createBullContext({ __tenantId: 'org_bull' }),
+        createInterceptor: (validateTenantId, diagnostics) =>
+          new TenantContextInterceptor(context, {
+            transport: 'bull', validateTenantId, diagnostics,
+          }),
+      },
+    ];
+
+    it.each(carrierCases)(
+      'should validate and restore a valid $name tenant',
+      async ({ tenantId, executionContext, createInterceptor }) => {
+        const validateTenantId = jest.fn((candidate: string) => candidate.startsWith('org_'));
+        const handler = {
+          handle: jest.fn(() => new Observable((subscriber) => {
+            expect(context.getTenantId()).toBe(tenantId);
+            subscriber.next('ok');
+            subscriber.complete();
+          })),
+        };
+
+        await expect(lastValueFrom(
+          createInterceptor(validateTenantId).intercept(executionContext(), handler),
+        )).resolves.toBe('ok');
+        expect(validateTenantId).toHaveBeenCalledTimes(1);
+        expect(validateTenantId).toHaveBeenCalledWith(tenantId);
+        expect(handler.handle).toHaveBeenCalledTimes(1);
+        expect(context.getTenantId()).toBeNull();
+      },
+    );
+
+    it.each(carrierCases)(
+      'should reject an invalid $name tenant before setting context or invoking the handler',
+      async ({ executionContext, createInterceptor }) => {
+        const handle = jest.fn(() => of('should-not-run'));
+        const validateTenantId = jest.fn(() => false);
+
+        await expect(lastValueFrom(
+          createInterceptor(validateTenantId).intercept(executionContext(), { handle }),
+        )).rejects.toThrow(BadRequestException);
+
+        expect(validateTenantId).toHaveBeenCalledTimes(1);
+        expect(handle).not.toHaveBeenCalled();
+        expect(context.getTenantId()).toBeNull();
+      },
+    );
+
+    it.each([
+      {
+        transport: 'kafka' as const,
+        executionContext: () => createKafkaContext({}),
+      },
+      {
+        transport: 'grpc' as const,
+        executionContext: () => createGrpcContext(new Map()),
+      },
+      {
+        transport: 'bull' as const,
+        executionContext: () => createBullContext({ orderId: '123' }),
+      },
+    ])('should not validate a missing $transport tenant', async ({
+      transport,
+      executionContext,
+    }) => {
+      const validateTenantId = jest.fn(() => false);
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport,
+        validateTenantId,
+      } as TenantContextInterceptorOptions);
+
+      await expect(lastValueFrom(configuredInterceptor.intercept(
+        executionContext(),
+        createMockCallHandler('missing'),
+      ))).resolves.toBe('missing');
+      expect(validateTenantId).not.toHaveBeenCalled();
+    });
+
+    it('should run an async validator in neutral context before entering the tenant context', async () => {
+      const observations: Array<[string, string | null, boolean]> = [];
+      const validateTenantId = jest.fn(async () => {
+        observations.push(['validate-start', context.getTenantId(), context.isBypassed()]);
+        await Promise.resolve();
+        observations.push(['validate-end', context.getTenantId(), context.isBypassed()]);
+        return true;
+      });
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'kafka',
+        validateTenantId,
+      });
+
+      await context.run('ambient-tenant', async () => {
+        await expect(lastValueFrom(configuredInterceptor.intercept(
+          createKafkaContext({ 'X-Tenant-Id': 'org_inbound' }),
+          {
+            handle: () => new Observable((subscriber) => {
+              observations.push(['handler', context.getTenantId(), context.isBypassed()]);
+              subscriber.next('ok');
+              subscriber.complete();
+            }),
+          },
+        ))).resolves.toBe('ok');
+        expect(context.getTenantId()).toBe('ambient-tenant');
+      });
+
+      expect(observations).toEqual([
+        ['validate-start', null, false],
+        ['validate-end', null, false],
+        ['handler', 'org_inbound', false],
+      ]);
+    });
+
+    it('should propagate a validator error unchanged without invoking the handler', async () => {
+      const validationError = new Error('validator unavailable');
+      const handle = jest.fn(() => of('should-not-run'));
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'bull',
+        validateTenantId: async () => { throw validationError; },
+      });
+
+      await expect(lastValueFrom(configuredInterceptor.intercept(
+        createBullContext({ __tenantId: 'org_bull' }),
+        { handle },
+      ))).rejects.toBe(validationError);
+      expect(handle).not.toHaveBeenCalled();
+      expect(context.getTenantId()).toBeNull();
+    });
+
+    it('should reject when an async validator resolves false', async () => {
+      const handle = jest.fn(() => of('should-not-run'));
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'grpc',
+        validateTenantId: async () => false,
+      });
+
+      await expect(lastValueFrom(configuredInterceptor.intercept(
+        createGrpcContext(new Map([['x-tenant-id', ['org_grpc']]])),
+        { handle },
+      ))).rejects.toThrow('Invalid tenant ID format');
+      expect(handle).not.toHaveBeenCalled();
+      expect(context.getTenantId()).toBeNull();
+    });
+
+    it('should not invoke the handler after unsubscribe while async validation is pending', async () => {
+      let resolveValidation: ((isValid: boolean) => void) | undefined;
+      const handle = jest.fn(() => of('should-not-run'));
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'bull',
+        validateTenantId: () => new Promise<boolean>((resolve) => {
+          resolveValidation = resolve;
+        }),
+      });
+
+      const subscription = configuredInterceptor.intercept(
+        createBullContext({ __tenantId: 'org_bull' }),
+        { handle },
+      ).subscribe();
+      expect(resolveValidation).toBeDefined();
+      expect(handle).not.toHaveBeenCalled();
+
+      subscription.unsubscribe();
+      resolveValidation?.(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(handle).not.toHaveBeenCalled();
+      expect(context.getTenantId()).toBeNull();
+    });
+
+    it('should report a redacted invalid-context diagnostic before rejecting', async () => {
+      const rejectedTenantId = 'untrusted-secret-tenant';
+      const diagnosticContexts: Array<[string | null, boolean]> = [];
+      const recordDiagnosticContext = () => {
+        diagnosticContexts.push([context.getTenantId(), context.isBypassed()]);
+      };
+      const eventService = { emit: jest.fn(recordDiagnosticContext) };
+      const telemetryService = {
+        recordMissingContext: jest.fn(),
+        recordInvalidContext: jest.fn(recordDiagnosticContext),
+      };
+      const diagnostics = new TenantContextDiagnostics(
+        { policy: 'ignore' },
+        eventService,
+        telemetryService,
+      );
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'kafka',
+        resource: 'orders',
+        diagnostics,
+        validateTenantId: () => false,
+      });
+      let rejection: unknown;
+
+      await context.run('ambient-tenant', async () => {
+        try {
+          await lastValueFrom(configuredInterceptor.intercept(
+            createKafkaContext({ 'X-Tenant-Id': rejectedTenantId }),
+            { handle: jest.fn(() => of('should-not-run')) },
+          ));
+        } catch (error) {
+          rejection = error;
+        }
+
+        expect(context.getTenantId()).toBe('ambient-tenant');
+      });
+
+      const expectedDiagnostic = {
+        transport: 'kafka',
+        operation: 'consume',
+        resource: 'orders',
+      };
+      expect(rejection).toBeInstanceOf(BadRequestException);
+      expect(eventService.emit).toHaveBeenCalledWith(
+        'tenant.context_invalid',
+        expectedDiagnostic,
+      );
+      expect(telemetryService.recordInvalidContext).toHaveBeenCalledWith(
+        expectedDiagnostic,
+      );
+      expect(diagnosticContexts).toEqual([
+        [null, false],
+        [null, false],
+      ]);
+      expect(JSON.stringify({
+        eventCalls: eventService.emit.mock.calls,
+        telemetryCalls: telemetryService.recordInvalidContext.mock.calls,
+        response: (rejection as BadRequestException).getResponse(),
+      })).not.toContain(rejectedTenantId);
+    });
+
+    it('should keep accepting arbitrary non-UUID RPC tenant IDs when validation is omitted', async () => {
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'kafka',
+      });
+
+      await expect(lastValueFrom(configuredInterceptor.intercept(
+        createKafkaContext({ 'X-Tenant-Id': 'legacy-tenant' }),
+        {
+          handle: () => of(context.getTenantId()),
+        },
+      ))).resolves.toBe('legacy-tenant');
     });
   });
 
