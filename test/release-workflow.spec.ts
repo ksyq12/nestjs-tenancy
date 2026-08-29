@@ -72,6 +72,7 @@ const GATE_RUN_COMMANDS = {
     'npm ci',
     'npm run typecheck',
     'npm run lint',
+    'npm run lint:typed',
     'npm run test:cov',
     'npm run build',
   ],
@@ -233,7 +234,10 @@ describe('shared validation workflow', () => {
   const releaseWorkflow = fs.readFileSync(releaseWorkflowPath, 'utf8');
   const packageManifest = JSON.parse(
     fs.readFileSync(packageManifestPath, 'utf8'),
-  ) as { devDependencies: Record<string, string> };
+  ) as {
+    devDependencies: Record<string, string>;
+    scripts: Record<string, string>;
+  };
   const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8')) as {
     packages: Record<
       string,
@@ -416,6 +420,12 @@ describe('shared validation workflow', () => {
       }
       expectRequiredJob(job);
     }
+  });
+
+  it('keeps typed lint as an explicit repository source gate', () => {
+    expect(packageManifest.scripts['lint:typed']).toBe(
+      'eslint --config eslint.typed.config.mjs src/ test/',
+    );
   });
 
   it('preserves the expanded release job and publish dependency graph', () => {
