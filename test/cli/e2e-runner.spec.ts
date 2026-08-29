@@ -136,9 +136,9 @@ describe('pgbouncer e2e runner env defaults', () => {
     ).toBe(6);
     expect(
       validatePrismaRuntimeVersions({
-        prisma: '7.9.1',
-        client: '7.9.1',
-        adapterPg: '7.9.1',
+        prisma: '7.10.0',
+        client: '7.10.0',
+        adapterPg: '7.10.0',
       }),
     ).toBe(7);
   });
@@ -146,17 +146,27 @@ describe('pgbouncer e2e runner env defaults', () => {
   it('rejects mixed or unsupported Prisma runtime majors', () => {
     expect(() =>
       validatePrismaRuntimeVersions({
-        prisma: '7.9.1',
+        prisma: '7.10.0',
         client: '6.19.3',
-        adapterPg: '7.9.1',
+        adapterPg: '7.10.0',
       }),
-    ).toThrow(/matching Prisma 6 or 7 runtimes/);
+    ).toThrow(/identical Prisma 6 or 7 runtime versions/);
     expect(() =>
       validatePrismaRuntimeVersions({
         prisma: '8.0.0',
         client: '8.0.0',
         adapterPg: '8.0.0',
       }),
-    ).toThrow(/matching Prisma 6 or 7 runtimes/);
+    ).toThrow(/identical Prisma 6 or 7 runtime versions/);
+  });
+
+  it('rejects Prisma runtimes from different patch versions', () => {
+    expect(() =>
+      validatePrismaRuntimeVersions({
+        prisma: '7.10.0',
+        client: '7.9.1',
+        adapterPg: '7.10.0',
+      }),
+    ).toThrow(/identical Prisma 6 or 7 runtime versions/);
   });
 });

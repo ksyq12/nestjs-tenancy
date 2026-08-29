@@ -70,7 +70,7 @@ describe('packed consumer peer compatibility runner', () => {
       '@nestjs/core': '10.4.22',
       '@nestjs/testing': '10.4.22',
       '@opentelemetry/api': '1.9.1',
-      '@prisma/client': '7.9.1',
+      '@prisma/client': '7.10.0',
       'reflect-metadata': '0.2.2',
       rxjs: '7.8.2',
     });

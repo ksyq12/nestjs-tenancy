@@ -20,16 +20,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Made `TenancyModule`'s validated `dbSettingKey` the canonical runtime setting inherited by the Prisma extension and `tenancyTransaction()`. Explicit identical values remain compatible, while mismatches now fail before database work starts.
 - Updated CLI scaffolding to emit a custom database setting key once in module configuration while sharing the same default and validator across runtime, `init`, `check`, and `doctor`.
 - Preserved the existing non-empty RPC tenant identifier behavior when no interceptor validator is supplied during 0.x. The planned v1.0.0 default is the same UUID-like validation used by HTTP; non-UUID consumers can preserve their contract with an explicit custom validator.
+- Updated the repository Prisma 7 CLI, client, and PostgreSQL adapter baseline together from 7.9.1 to the stable 7.10.0 release while retaining the exact Prisma 6.19.3 compatibility lane.
 
 ### Fixed
 
 - Preserved synchronous tenant-scoped cache keys for `@nestjs/cache-manager` 2.x while retaining asynchronous base-key support for 3.x, preventing a Promise object from being passed to 2.x cache stores as the key.
+
+### Security
+
+- Reassessed the `prisma` development-tool path to vulnerable `deepmerge-ts@7.1.5`: production installs remain at zero audit findings, Prisma 7.10.0 still pins the affected dependency through `@prisma/config`, and npm's breaking downgrade suggestion is intentionally not applied while the upstream fix is pending.
 
 ### Tests
 
 - Replaced the diagonal in-repository NestJS/Prisma compatibility override with isolated, strict-install packed-tarball consumers covering NestJS 10/11 × Prisma 6/7, including supported lower-bound and repository-locked optional cache/event profiles.
 - Added an isolated actual-tarball consumer smoke for the root, cache, and testing runtime/declaration exports; the cache-free root import; and the installed CLI bin, shebang, help, and invalid-invocation exit contract.
 - Added Kafka string/Buffer, gRPC metadata, and Bull data validator coverage for valid, invalid, missing, async, cancellation, context isolation, and redacted diagnostics paths.
+- Required the Prisma CLI, client, and PostgreSQL adapter to use one identical version before PgBouncer E2E starts, and moved the Prisma 7 consumer and pooler lanes to exact 7.10.0.
 
 ### Documentation
 

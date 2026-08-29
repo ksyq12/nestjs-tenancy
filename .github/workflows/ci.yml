@@ -132,7 +132,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        prisma: ['6.19.3', '7.9.1']
+        prisma: ['6.19.3', '7.10.0']
 
     steps:
       - uses: actions/checkout@v6

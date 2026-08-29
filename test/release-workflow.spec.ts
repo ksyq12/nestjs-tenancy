@@ -13,6 +13,8 @@ const ciWorkflowPath = path.join(
   'workflows',
   'ci.yml',
 );
+const packageManifestPath = path.join(process.cwd(), 'package.json');
+const packageLockPath = path.join(process.cwd(), 'package-lock.json');
 
 // Captured from the M08B graph at 1c6fb98e170a999bc775fb40f970496b8066b35c.
 const PRE_REFACTOR_GRAPH = {
@@ -223,6 +225,15 @@ function expectRequiredJob(block: string): void {
 describe('shared validation workflow', () => {
   const ciWorkflow = fs.readFileSync(ciWorkflowPath, 'utf8');
   const releaseWorkflow = fs.readFileSync(releaseWorkflowPath, 'utf8');
+  const packageManifest = JSON.parse(
+    fs.readFileSync(packageManifestPath, 'utf8'),
+  ) as { devDependencies: Record<string, string> };
+  const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8')) as {
+    packages: Record<
+      string,
+      { devDependencies?: Record<string, string>; version?: string }
+    >;
+  };
 
   it('keeps the pre-refactor validation job and matrix inventory exact', () => {
     expect(readJobIds(ciWorkflow)).toEqual([
@@ -248,6 +259,22 @@ describe('shared validation workflow', () => {
         .match(/^ {8}prisma: \[([^\]]+)\]$/m)?.[1]
         .split(',')
         .map((version) => version.trim().replaceAll("'", '')) ?? [];
+    const prismaPackages = [
+      'prisma',
+      '@prisma/client',
+      '@prisma/adapter-pg',
+    ];
+    const declaredPrismaVersions = prismaPackages.map(
+      (packageName) => packageManifest.devDependencies[packageName],
+    );
+    const lockRootPrismaVersions = prismaPackages.map(
+      (packageName) =>
+        packageLock.packages[''].devDependencies?.[packageName],
+    );
+    const resolvedPrismaVersions = prismaPackages.map(
+      (packageName) =>
+        packageLock.packages[`node_modules/${packageName}`].version,
+    );
     const actualCardinality = {
       test: sourceVersions.length,
       compat: compatLanes.length,
@@ -266,7 +293,18 @@ describe('shared validation workflow', () => {
       'nest11-prisma6',
       'nest11-prisma7',
     ]);
-    expect(prismaVersions).toEqual(['6.19.3', '7.9.1']);
+    expect(declaredPrismaVersions).toEqual([
+      '^7.10.0',
+      '^7.10.0',
+      '^7.10.0',
+    ]);
+    expect(lockRootPrismaVersions).toEqual(declaredPrismaVersions);
+    expect(resolvedPrismaVersions).toEqual([
+      '7.10.0',
+      '7.10.0',
+      '7.10.0',
+    ]);
+    expect(prismaVersions).toEqual(['6.19.3', '7.10.0']);
     expect(actualCardinality).toEqual(PRE_REFACTOR_GRAPH.matrixCardinality);
     expect(Object.values(actualCardinality).reduce((a, b) => a + b, 0)).toBe(
       13,

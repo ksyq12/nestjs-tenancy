@@ -85,18 +85,19 @@ function readInstalledPackageVersion(packageName) {
 
 function validatePrismaRuntimeVersions(versions) {
   const entries = Object.entries(versions);
-  const majors = entries.map(([, version]) =>
+  const runtimeVersions = entries.map(([, version]) => version);
+  const majors = runtimeVersions.map((version) =>
     Number.parseInt(version.split('.')[0], 10),
   );
   const supported = majors.every((major) => major === 6 || major === 7);
-  const aligned = new Set(majors).size === 1;
+  const aligned = new Set(runtimeVersions).size === 1;
 
   if (!supported || !aligned) {
     const details = entries
       .map(([name, version]) => `${name}=${version}`)
       .join(', ');
     throw new Error(
-      `PgBouncer E2E requires matching Prisma 6 or 7 runtimes; found ${details}`,
+      `PgBouncer E2E requires identical Prisma 6 or 7 runtime versions; found ${details}`,
     );
   }
 
@@ -119,10 +120,12 @@ function main() {
   applyDefaultEnv(process.env);
 
   let exitCode = 0;
+  let composeAttempted = false;
 
   try {
-    run(`docker compose --profile ${COMPOSE_PROFILE} up -d --wait`);
     const prismaMajor = getInstalledPrismaMajor();
+    composeAttempted = true;
+    run(`docker compose --profile ${COMPOSE_PROFILE} up -d --wait`);
     const adapterSchema =
       prismaMajor === 6 ? PRISMA_6_ADAPTER_SCHEMA : SCHEMA;
     run(`prisma generate --schema=${adapterSchema}`);
@@ -134,10 +137,12 @@ function main() {
     console.error(error instanceof Error ? error.message : error);
     exitCode = error.status || 1;
   } finally {
-    try {
-      run(`docker compose --profile ${COMPOSE_PROFILE} down`);
-    } catch {
-      // best-effort cleanup
+    if (composeAttempted) {
+      try {
+        run(`docker compose --profile ${COMPOSE_PROFILE} down`);
+      } catch {
+        // best-effort cleanup
+      }
     }
   }
 

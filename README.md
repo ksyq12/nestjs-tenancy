@@ -85,7 +85,7 @@ they are not the same claim:
 |------|--------------------|----------------------------------------|
 | Node.js | `^22.13.0 \|\| ^24.0.0` | Lint, unit/coverage, and build run on exact 22.13.0, the current Node 22 release, and the current Node 24 release. Database and infrastructure jobs run on current Node 22; publishing runs on current Node 24. |
 | NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | A strict, isolated packed-tarball consumer matrix covers exact NestJS 10.4.22 and 11.2.1 across both supported Prisma majors on current Node 22. The locked primary graph uses NestJS 11.2.1, and the ecosystem fixture uses exact NestJS 10.4.20. |
-| Prisma | Peer range `^6.0.0 \|\| ^7.0.0` | The packed consumer matrix covers exact Prisma 6.19.3 and 7.9.1 with each supported NestJS major. The locked primary and direct PostgreSQL lanes use 7.9.1, the PgBouncer matrix uses both exact versions, and the ecosystem lane uses 6.19.3. |
+| Prisma | Peer range `^6.0.0 \|\| ^7.0.0` | The packed consumer matrix covers exact Prisma 6.19.3 and 7.10.0 with each supported NestJS major. The locked primary and direct PostgreSQL lanes use 7.10.0, the PgBouncer matrix uses both exact versions, and the ecosystem lane uses 6.19.3. |
 
 The four-way consumer matrix installs the actual packed tarball with
 `--strict-peer-deps` and without `--force`, `--legacy-peer-deps`, or another
@@ -288,7 +288,7 @@ await tenancyTransaction(prisma, tenancyService, async (tx) => {
 
 The helper forwards Prisma's public interactive transaction options (`maxWait`, `timeout`, and `isolationLevel`). It resolves the canonical database setting key and tenant before starting the transaction, applies transaction-local `set_config()` before invoking your callback, and propagates transaction-start, context-setup, callback, timeout, and database errors unchanged. A mismatched explicit key fails before `$transaction()` is called.
 
-`maxWait` enforcement belongs to the Prisma runtime. The verified Prisma 7.9.1 `PrismaPg` adapter and Prisma 6.19.3 native engine reject when their client connection pool cannot start in time. Prisma 6.19.3 `PrismaPg` accepts the option but does not enforce it under adapter-pool contention; the matrix keeps this as a negative contract. If bounded transaction admission is required on Prisma 6, use the native engine or enforce admission before calling the helper.
+`maxWait` enforcement belongs to the Prisma runtime. The verified Prisma 7.10.0 `PrismaPg` adapter and Prisma 6.19.3 native engine reject when their client connection pool cannot start in time. Prisma 6.19.3 `PrismaPg` accepts the option but does not enforce it under adapter-pool contention; the matrix keeps this as a negative contract. If bounded transaction admission is required on Prisma 6, use the native engine or enforce admission before calling the helper.
 
 > **Compatibility note:** `interactiveTransactionSupport: true` is deprecated because it relies on Prisma internal APIs. Existing users should keep an exact-version E2E lane while migrating to `tenancyTransaction()`.
 
@@ -1142,7 +1142,7 @@ try {
 
 ### PgBouncer Support Contract
 
-The verified pooler contract covers the repository's pinned, self-hosted **PgBouncer transaction mode** configuration for pooled application queries. The matrix currently verifies PostgreSQL 16.14, PgBouncer 1.25.2, Prisma 6.19.3, and Prisma 7.9.1.
+The verified pooler contract covers the repository's pinned, self-hosted **PgBouncer transaction mode** configuration for pooled application queries. The matrix currently verifies PostgreSQL 16.14, PgBouncer 1.25.2, Prisma 6.19.3, and Prisma 7.10.0.
 
 - Configure `pool_mode = transaction` and `max_prepared_statements = 200`. With the tested PgBouncer 1.25.2 configuration, do not add the legacy `pgbouncer=true` URL parameter.
 - Use a direct PostgreSQL URL for Prisma CLI, migration, and test setup operations. Route application queries through the PgBouncer URL.
@@ -1150,7 +1150,7 @@ The verified pooler contract covers the repository's pinned, self-hosted **PgBou
 - Pool-size-one tests force the same physical backend through tenant A, tenant B, no-context, commit, callback rollback, database-error rollback, and high logical concurrency scenarios. The timeout lane separately verifies rollback and clean state while allowing PgBouncer or the client pool to replace the backend.
 - A pool-size-two lane verifies real overlap on two backends, clean state on both, and clean replacement sessions after PgBouncer `RECONNECT`.
 - `tenancyTransaction()` is the canonical path. Its timeout, isolation, custom-key, context-setup failure, and rollback contracts are exercised against both supported Prisma majors. `maxWait` is positive-tested on Prisma 7 `PrismaPg` and Prisma 6 native, with the Prisma 6 `PrismaPg` limitation fixed as a negative contract. The batch extension and deprecated transparent compatibility mode are tested separately.
-- The runner fails fast unless the Prisma CLI, client, and PostgreSQL adapter all use the same supported major (6 or 7).
+- The runner fails fast unless the Prisma CLI, client, and PostgreSQL adapter all use the same exact supported version in major 6 or 7.
 - Prisma Data Proxy, managed PgBouncer services, and other custom pooler settings remain outside the repository support guarantee. Deployment owners must validate the exact production mode and prepared-statement settings with equivalent isolation, rollback, reuse, and concurrency scenarios.
 
 Reproduce the pinned local matrix with Docker:
@@ -1159,7 +1159,7 @@ Reproduce the pinned local matrix with Docker:
 npm run test:e2e:pgbouncer
 ```
 
-CI and release workflows run this command against the pinned Prisma 6.19.3 and 7.9.1 lanes. See [`docker-compose.yml`](./docker-compose.yml), [`scripts/test-pgbouncer-e2e.js`](./scripts/test-pgbouncer-e2e.js), and the [PgBouncer E2E specification](./test/e2e/pgbouncer/pgbouncer.e2e-spec.ts).
+CI and release workflows run this command against the pinned Prisma 6.19.3 and 7.10.0 lanes. See [`docker-compose.yml`](./docker-compose.yml), [`scripts/test-pgbouncer-e2e.js`](./scripts/test-pgbouncer-e2e.js), and the [PgBouncer E2E specification](./test/e2e/pgbouncer/pgbouncer.e2e-spec.ts).
 
 ### Security Considerations
 

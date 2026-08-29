@@ -45,7 +45,7 @@ const COMPATIBILITY_LANES = [
     nestMajor: 10,
     nestVersion: '10.4.22',
     prismaMajor: 7,
-    prismaVersion: '7.9.1',
+    prismaVersion: '7.10.0',
     reflectMetadataVersion: '0.2.2',
     optionalPeerProfile: 'none',
     optionalPeers: {},
@@ -67,7 +67,7 @@ const COMPATIBILITY_LANES = [
     nestMajor: 11,
     nestVersion: '11.2.1',
     prismaMajor: 7,
-    prismaVersion: '7.9.1',
+    prismaVersion: '7.10.0',
     reflectMetadataVersion: '0.2.2',
     optionalPeerProfile: 'current',
     optionalPeers: {

@@ -20,7 +20,7 @@ const COMMON_DEPENDENCIES = {
   '@nestjs/common': '11.2.1',
   '@nestjs/core': '11.2.1',
   '@opentelemetry/api': '1.9.1',
-  '@prisma/client': '7.9.1',
+  '@prisma/client': '7.10.0',
   'reflect-metadata': '0.2.2',
   rxjs: '7.8.2',
 };
