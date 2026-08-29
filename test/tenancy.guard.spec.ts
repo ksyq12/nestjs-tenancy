@@ -61,6 +61,16 @@ describe('TenancyGuard', () => {
     expect(guard.canActivate(createMockContext())).toBe(true);
   });
 
+  it('should not turn an active tenant into an explicit bypass for @BypassTenancy', () => {
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(true);
+
+    context.run('tenant-123', () => {
+      expect(guard.canActivate(createMockContext())).toBe(true);
+      expect(context.getTenantId()).toBe('tenant-123');
+      expect(context.isBypassed()).toBe(false);
+    });
+  });
+
   it('should emit tenant.context_bypassed when @BypassTenancy is set', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(true);
     guard.canActivate(createMockContext());

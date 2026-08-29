@@ -1,5 +1,5 @@
 import { CallHandler, ExecutionContext } from '@nestjs/common';
-import { Observable, of, Subscription } from 'rxjs';
+import { Observable, of, Subscription, take } from 'rxjs';
 import { TenancyContext } from '../src/services/tenancy-context';
 import { TenantContextInterceptor } from '../src/propagation/tenant-context.interceptor';
 import { TenantContextDiagnostics } from '../src/diagnostics/tenant-context-diagnostics';
@@ -103,6 +103,25 @@ describe('TenantContextInterceptor', () => {
         next: (val) => expect(val).toBe('result'),
         complete: () => done(),
       });
+    });
+
+    it('should preserve an HTTP tenant already established by middleware', () => {
+      const execCtx = createHttpContext({});
+      let observedTenant: string | null = null;
+
+      context.run('http-tenant', () => {
+        interceptor.intercept(execCtx, {
+          handle: () => new Observable((subscriber) => {
+            observedTenant = context.getTenantId();
+            subscriber.complete();
+          }),
+        }).subscribe();
+
+        expect(context.getTenantId()).toBe('http-tenant');
+      });
+
+      expect(observedTenant).toBe('http-tenant');
+      expect(context.getTenantId()).toBeNull();
     });
 
     it('should not diagnose HTTP even when an RPC transport option is configured', (done) => {
@@ -277,6 +296,233 @@ describe('TenantContextInterceptor', () => {
         { handle },
       )).toThrow('Tenant context is missing during kafka.consume');
       expect(handle).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('inbound context isolation', () => {
+    const OUTER_TENANT = 'ambient-tenant-a';
+
+    it.each([
+      {
+        transport: 'kafka' as const,
+        executionContext: () => createKafkaContext({}),
+      },
+      {
+        transport: 'grpc' as const,
+        executionContext: () => createGrpcContext(new Map()),
+      },
+      {
+        transport: 'bull' as const,
+        executionContext: () => createBullContext({ orderId: '123' }),
+      },
+    ])('should neutralize ambient context for tenant-missing $transport subscriptions', ({
+      transport,
+      executionContext,
+    }) => {
+      const configuredInterceptor = new TenantContextInterceptor(context, { transport });
+      let observedError: unknown;
+      const handle = jest.fn(() => new Observable((subscriber) => {
+        expect(context.getTenantId()).toBeNull();
+        expect(context.isBypassed()).toBe(false);
+        subscriber.next('ok');
+        subscriber.complete();
+      }));
+
+      context.run(OUTER_TENANT, () => {
+        configuredInterceptor.intercept(executionContext(), { handle }).subscribe({
+          error: (error) => { observedError = error; },
+        });
+
+        expect(observedError).toBeUndefined();
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+        expect(context.isBypassed()).toBe(false);
+      });
+
+      expect(handle).toHaveBeenCalledTimes(1);
+      expect(context.getTenantId()).toBeNull();
+    });
+
+    it('should nest a valid inbound tenant and restore the outer tenant after completion', () => {
+      const execCtx = createKafkaContext({ 'X-Tenant-Id': 'inbound-tenant-b' });
+      let observedError: unknown;
+      const handle = jest.fn(() => new Observable((subscriber) => {
+        expect(context.getTenantId()).toBe('inbound-tenant-b');
+        expect(context.isBypassed()).toBe(false);
+        subscriber.next('ok');
+        subscriber.complete();
+      }));
+
+      context.run(OUTER_TENANT, () => {
+        interceptor.intercept(execCtx, { handle }).subscribe({
+          error: (error) => { observedError = error; },
+        });
+
+        expect(observedError).toBeUndefined();
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+
+      expect(handle).toHaveBeenCalledTimes(1);
+    });
+
+    it('should neutralize an unclassified RPC and restore an outer explicit bypass', () => {
+      let observedError: unknown;
+      const handle = jest.fn(() => new Observable((subscriber) => {
+        expect(context.getTenantId()).toBeNull();
+        expect(context.isBypassed()).toBe(false);
+        subscriber.complete();
+      }));
+
+      context.runWithoutTenant(() => {
+        interceptor.intercept(
+          createBullContext({ orderId: '123' }),
+          { handle },
+        ).subscribe({ error: (error) => { observedError = error; } });
+
+        expect(observedError).toBeUndefined();
+        expect(context.getTenantId()).toBeNull();
+        expect(context.isBypassed()).toBe(true);
+      });
+
+      expect(handle).toHaveBeenCalledTimes(1);
+      expect(context.getTenantId()).toBeNull();
+      expect(context.isBypassed()).toBe(false);
+    });
+
+    it('should run missing-context diagnostics without the ambient tenant or bypass', () => {
+      const observations: Array<[string | null, boolean]> = [];
+      const configuredInterceptor = new TenantContextInterceptor(context, {
+        transport: 'kafka',
+        diagnostics: new TenantContextDiagnostics({
+          policy: 'warn',
+          onMissing: () => {
+            observations.push([context.getTenantId(), context.isBypassed()]);
+          },
+        }),
+      });
+
+      context.run(OUTER_TENANT, () => {
+        configuredInterceptor.intercept(
+          createKafkaContext({}),
+          createMockCallHandler('ok'),
+        ).subscribe();
+
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+
+      expect(observations).toEqual([[null, false]]);
+    });
+
+    it('should isolate concurrent inbound tenant subscriptions', async () => {
+      const observeTenant = (tenantId: string, delay: number) => {
+        const execCtx = createKafkaContext({ 'X-Tenant-Id': tenantId });
+        return new Promise<string>((resolve, reject) => {
+          interceptor.intercept(execCtx, {
+            handle: () => new Observable((subscriber) => {
+              const timer = setTimeout(() => {
+                subscriber.next(context.getTenantId());
+                subscriber.complete();
+              }, delay);
+              return () => clearTimeout(timer);
+            }),
+          }).subscribe({
+            next: (value) => resolve(value as string),
+            error: reject,
+          });
+        });
+      };
+
+      await context.run(OUTER_TENANT, async () => {
+        const tenants = await Promise.all([
+          observeTenant('inbound-tenant-a', 10),
+          observeTenant('inbound-tenant-b', 1),
+        ]);
+
+        expect(tenants).toEqual(['inbound-tenant-a', 'inbound-tenant-b']);
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+    });
+
+    it('should restore the outer tenant after handler throw and unsubscribe', () => {
+      const execCtx = createKafkaContext({ 'X-Tenant-Id': 'inbound-tenant-b' });
+      const handlerError = new Error('handler failed');
+      let observedError: unknown;
+
+      context.run(OUTER_TENANT, () => {
+        interceptor.intercept(execCtx, {
+          handle: () => {
+            expect(context.getTenantId()).toBe('inbound-tenant-b');
+            throw handlerError;
+          },
+        } as CallHandler).subscribe({ error: (error) => { observedError = error; } });
+
+        expect(observedError).toBe(handlerError);
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+
+        const subscription = interceptor.intercept(execCtx, {
+          handle: () => new Observable(() => undefined),
+        }).subscribe();
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+
+        subscription.unsubscribe();
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+    });
+
+    it('should neutralize missing-handler throw and teardown before restoring the outer tenant', () => {
+      const missingInterceptor = new TenantContextInterceptor(context, { transport: 'kafka' });
+      const execCtx = createKafkaContext({});
+      const handlerError = new Error('missing handler failed');
+      let observedError: unknown;
+      let teardownContext: [string | null, boolean] | undefined;
+
+      context.run(OUTER_TENANT, () => {
+        missingInterceptor.intercept(execCtx, {
+          handle: () => {
+            expect(context.getTenantId()).toBeNull();
+            expect(context.isBypassed()).toBe(false);
+            throw handlerError;
+          },
+        } as CallHandler).subscribe({ error: (error) => { observedError = error; } });
+
+        expect(observedError).toBe(handlerError);
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+
+        const subscription = missingInterceptor.intercept(execCtx, {
+          handle: () => new Observable(() => () => {
+            teardownContext = [context.getTenantId(), context.isBypassed()];
+          }),
+        }).subscribe();
+
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+        subscription.unsubscribe();
+        expect(teardownContext).toEqual([null, false]);
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+    });
+
+    it('should stop a synchronous inner source when downstream unsubscribes', () => {
+      const execCtx = createKafkaContext({ 'X-Tenant-Id': 'inbound-tenant-b' });
+      const produced: number[] = [];
+      const received: unknown[] = [];
+
+      context.run(OUTER_TENANT, () => {
+        interceptor.intercept(execCtx, {
+          handle: () => new Observable((subscriber) => {
+            for (const value of [1, 2, 3]) {
+              if (subscriber.closed) break;
+              produced.push(value);
+              subscriber.next(value);
+            }
+            subscriber.complete();
+          }),
+        }).pipe(take(1)).subscribe((value) => received.push(value));
+
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+
+      expect(received).toEqual([1]);
+      expect(produced).toEqual([1]);
+      expect(context.getTenantId()).toBeNull();
     });
   });
 

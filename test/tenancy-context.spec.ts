@@ -1,4 +1,7 @@
-import { TenancyContext } from '../src/services/tenancy-context';
+import {
+  runInEmptyTenancyContext,
+  TenancyContext,
+} from '../src/services/tenancy-context';
 
 describe('TenancyContext', () => {
   let context: TenancyContext;
@@ -140,6 +143,31 @@ describe('TenancyContext', () => {
         return 'ok';
       });
       expect(result).toBe('ok');
+    });
+  });
+
+  describe('runInEmptyTenancyContext', () => {
+    it('should clear tenant and explicit bypass while restoring each outer store', async () => {
+      await context.run('outer-tenant', async () => {
+        await context.runWithoutTenant(async () => {
+          expect(context.getTenantId()).toBeNull();
+          expect(context.isBypassed()).toBe(true);
+
+          await runInEmptyTenancyContext(async () => {
+            expect(context.getTenantId()).toBeNull();
+            expect(context.isBypassed()).toBe(false);
+          });
+
+          expect(context.getTenantId()).toBeNull();
+          expect(context.isBypassed()).toBe(true);
+        });
+
+        expect(context.getTenantId()).toBe('outer-tenant');
+        expect(context.isBypassed()).toBe(false);
+      });
+
+      expect(context.getTenantId()).toBeNull();
+      expect(context.isBypassed()).toBe(false);
     });
   });
 });

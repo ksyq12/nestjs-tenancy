@@ -5,6 +5,10 @@ import {
   PrismaTenancyExtensionOptions,
 } from '../src/prisma/prisma-tenancy.extension';
 import { TenancyContextRequiredError } from '../src/errors/tenancy-context-required.error';
+import { TenantMiddleware } from '../src/middleware/tenant.middleware';
+import { TenancyTelemetryService } from '../src/telemetry/tenancy-telemetry.service';
+import { TenancyModuleOptions } from '../src/interfaces/tenancy-module-options.interface';
+import { createMockEventService } from './__helpers__/mocks';
 
 /**
  * Unit tests for createPrismaTenancyExtension.
@@ -626,6 +630,50 @@ describe('createPrismaTenancyExtension', () => {
           query: jest.fn(),
         }),
       ).rejects.toThrow(TenancyContextRequiredError);
+    });
+
+    it('should fail closed for a tenant-missing HTTP boundary nested in an outer tenant', async () => {
+      const { mockPrisma, mockTransaction, mockExecuteRaw } = buildMockPrisma();
+      const handler = getHandlerWithFailClosed(mockPrisma);
+      const mockQuery = jest.fn().mockResolvedValue([{ id: 1, tenant_id: 'ambient-tenant-a' }]);
+      mockTransaction.mockResolvedValue([1, [{ id: 1, tenant_id: 'ambient-tenant-a' }]]);
+
+      const options: TenancyModuleOptions = { tenantExtractor: 'x-tenant-id' };
+      const middleware = new TenantMiddleware(
+        options,
+        context,
+        createMockEventService(),
+        new TenancyTelemetryService(options),
+      );
+      let queryAssertion: Promise<void> | undefined;
+
+      await context.run('ambient-tenant-a', async () => {
+        await middleware.use(
+          { headers: {}, method: 'GET', path: '/orders', ip: '127.0.0.1' } as any,
+          {} as any,
+          () => {
+            expect(service.getCurrentTenant()).toBeNull();
+            expect(service.isTenantBypassed()).toBe(false);
+            queryAssertion = expect(
+              handler({
+                model: 'Order',
+                operation: 'findMany',
+                args: {},
+                query: mockQuery,
+              }),
+            ).rejects.toBeInstanceOf(TenancyContextRequiredError);
+          },
+        );
+
+        expect(queryAssertion).toBeDefined();
+        await queryAssertion;
+        expect(service.getCurrentTenant()).toBe('ambient-tenant-a');
+      });
+
+      expect(service.getCurrentTenant()).toBeNull();
+      expect(mockQuery).not.toHaveBeenCalled();
+      expect(mockExecuteRaw).not.toHaveBeenCalled();
+      expect(mockTransaction).not.toHaveBeenCalled();
     });
 
     it('should include model and operation in error', async () => {

@@ -9,7 +9,7 @@ import type { NestMiddleware } from '@nestjs/common';
 import type { TenancyRequest, TenancyResponse } from '../interfaces/tenancy-request.interface';
 import type { TenancyModuleOptions } from '../interfaces/tenancy-module-options.interface';
 import type { TenantExtractor } from '../interfaces/tenant-extractor.interface';
-import { TenancyContext } from '../services/tenancy-context';
+import { runInEmptyTenancyContext, TenancyContext } from '../services/tenancy-context';
 import { TenancyEventService } from '../events/tenancy-event.service';
 import { summarizeTenancyRequest, TenancyEvents } from '../events/tenancy-events';
 import { HeaderTenantExtractor } from '../extractors/header.extractor';
@@ -52,6 +52,14 @@ export class TenantMiddleware implements NestMiddleware {
   }
 
   async use(req: TenancyRequest, res: TenancyResponse, next: (error?: any) => void): Promise<void> {
+    return runInEmptyTenancyContext(() => this.handleRequest(req, res, next));
+  }
+
+  private async handleRequest(
+    req: TenancyRequest,
+    res: TenancyResponse,
+    next: (error?: any) => void,
+  ): Promise<void> {
     const requestSummary = summarizeTenancyRequest(req);
     let tenantId: string | null;
 

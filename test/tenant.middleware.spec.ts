@@ -53,6 +53,113 @@ describe('TenantMiddleware', () => {
     });
   });
 
+  describe('inbound context isolation', () => {
+    const OUTER_TENANT = 'ambient-tenant-a';
+    const INBOUND_TENANT = '550e8400-e29b-41d4-a716-446655440000';
+
+    it('should neutralize ambient tenant and bypass state for a tenant-missing request', async () => {
+      const context = new TenancyContext();
+      const observations: Array<[string, string | null, boolean]> = [];
+      const tenantExtractor: TenantExtractor = {
+        extract: async () => {
+          observations.push(['extract', context.getTenantId(), context.isBypassed()]);
+          return null;
+        },
+      };
+      const onTenantNotFound = jest.fn(async () => {
+        observations.push(['not-found', context.getTenantId(), context.isBypassed()]);
+      });
+      const mw = createMiddleware({ tenantExtractor, onTenantNotFound });
+      let asyncDownstream: Promise<[string, string | null, boolean]> | undefined;
+
+      await context.run(OUTER_TENANT, async () => {
+        await mw.use(mockReq(), mockRes(), () => {
+          observations.push(['next', context.getTenantId(), context.isBypassed()]);
+          asyncDownstream = new Promise((resolve) => {
+            setImmediate(() => {
+              resolve(['async-next', context.getTenantId(), context.isBypassed()]);
+            });
+          });
+        });
+
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+        expect(context.isBypassed()).toBe(false);
+        await expect(asyncDownstream).resolves.toEqual(['async-next', null, false]);
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+
+      expect(observations).toEqual([
+        ['extract', null, false],
+        ['not-found', null, false],
+        ['next', null, false],
+      ]);
+    });
+
+    it('should validate in a neutral context, nest a valid inbound tenant, and restore outer tenant', async () => {
+      const context = new TenancyContext();
+      const observations: Array<[string, string | null, boolean]> = [];
+      const tenantExtractor: TenantExtractor = {
+        extract: () => {
+          observations.push(['extract', context.getTenantId(), context.isBypassed()]);
+          return INBOUND_TENANT;
+        },
+      };
+      const mw = createMiddleware({
+        tenantExtractor,
+        validateTenantId: async () => {
+          observations.push(['validate', context.getTenantId(), context.isBypassed()]);
+          return true;
+        },
+        crossCheck: {
+          extractor: {
+            extract: () => {
+              observations.push(['cross-check', context.getTenantId(), context.isBypassed()]);
+              return INBOUND_TENANT;
+            },
+          },
+        },
+        onTenantResolved: async () => {
+          observations.push(['resolved', context.getTenantId(), context.isBypassed()]);
+        },
+      });
+
+      await context.run(OUTER_TENANT, async () => {
+        await mw.use(mockReq(), mockRes(), () => {
+          observations.push(['next', context.getTenantId(), context.isBypassed()]);
+        });
+
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+      });
+
+      expect(observations).toEqual([
+        ['extract', null, false],
+        ['validate', null, false],
+        ['cross-check', null, false],
+        ['resolved', INBOUND_TENANT, false],
+        ['next', INBOUND_TENANT, false],
+      ]);
+    });
+
+    it('should restore the outer tenant after a downstream throw', async () => {
+      const context = new TenancyContext();
+      const mw = createMiddleware();
+      const downstreamError = new Error('downstream failed');
+
+      await context.run(OUTER_TENANT, async () => {
+        await expect(
+          mw.use(mockReq(), mockRes(), () => {
+            expect(context.getTenantId()).toBeNull();
+            expect(context.isBypassed()).toBe(false);
+            throw downstreamError;
+          }),
+        ).rejects.toBe(downstreamError);
+
+        expect(context.getTenantId()).toBe(OUTER_TENANT);
+        expect(context.isBypassed()).toBe(false);
+      });
+    });
+  });
+
   it('should throw BadRequestException for invalid tenant ID', async () => {
     const mw = createMiddleware();
     await expect(

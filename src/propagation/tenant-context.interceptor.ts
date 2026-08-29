@@ -4,8 +4,8 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
-import { Observable, Subscription } from 'rxjs';
-import { TenancyContext } from '../services/tenancy-context';
+import { Observable, Subscriber } from 'rxjs';
+import { runInEmptyTenancyContext, TenancyContext } from '../services/tenancy-context';
 import { DEFAULT_PROPAGATION_HEADER, DEFAULT_BULL_DATA_KEY, DEFAULT_GRPC_METADATA_KEY } from '../tenancy.constants';
 import type { TenantContextDiagnostics } from '../diagnostics/tenant-context-diagnostics';
 
@@ -90,29 +90,58 @@ export class TenantContextInterceptor implements NestInterceptor {
     const tenantId = this.extractTenantId(executionContext);
 
     if (!tenantId) {
-      const transport = executionContext.getType() === 'rpc'
-        ? this.transport ?? this.detectTransport(executionContext)
-        : null;
-      if (transport) {
-        this.diagnostics?.report({
-          transport,
-          operation: 'consume',
-          ...(this.resource ? { resource: this.resource } : {}),
+      if (executionContext.getType() !== 'rpc') {
+        return next.handle();
+      }
+
+      const transport = this.transport ?? this.detectTransport(executionContext);
+      const diagnostics = this.diagnostics;
+      if (transport && diagnostics) {
+        runInEmptyTenancyContext(() => {
+          diagnostics.report({
+            transport,
+            operation: 'consume',
+            ...(this.resource ? { resource: this.resource } : {}),
+          });
         });
       }
-      return next.handle();
+
+      return this.subscribeInContext(null, next);
     }
 
+    return this.subscribeInContext(tenantId, next);
+  }
+
+  private subscribeInContext(tenantId: string | null, next: CallHandler): Observable<unknown> {
     return new Observable((subscriber) => {
-      let sub: Subscription | undefined;
+      const innerSubscriber = new Subscriber<unknown>({
+        next: (value) => subscriber.next(value),
+        error: (error: unknown) => subscriber.error(error),
+        complete: () => subscriber.complete(),
+      });
+      const unsubscribe = () => {
+        if (tenantId) {
+          this.context.run(tenantId, () => innerSubscriber.unsubscribe());
+        } else {
+          runInEmptyTenancyContext(() => innerSubscriber.unsubscribe());
+        }
+      };
+
+      subscriber.add(unsubscribe);
+
       try {
-        this.context.run(tenantId, () => {
-          sub = next.handle().subscribe(subscriber);
-        });
+        const subscribe = () => {
+          next.handle().subscribe(innerSubscriber);
+        };
+
+        if (tenantId) {
+          this.context.run(tenantId, subscribe);
+        } else {
+          runInEmptyTenancyContext(subscribe);
+        }
       } catch (err) {
         subscriber.error(err);
       }
-      return () => sub?.unsubscribe();
     });
   }
 
