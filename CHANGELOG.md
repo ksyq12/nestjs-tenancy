@@ -22,6 +22,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Tests
 
 - Replaced the diagonal in-repository NestJS/Prisma compatibility override with isolated, strict-install packed-tarball consumers covering NestJS 10/11 × Prisma 6/7, including supported lower-bound and repository-locked optional cache/event profiles.
+- Added an isolated actual-tarball consumer smoke for the root, cache, and testing runtime/declaration exports; the cache-free root import; and the installed CLI bin, shebang, help, and invalid-invocation exit contract.
 
 ### Documentation
 

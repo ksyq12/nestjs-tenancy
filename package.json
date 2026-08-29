@@ -44,6 +44,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:compat": "npm run build && node scripts/test-peer-compat.js",
+    "test:package": "npm run build && node scripts/test-package-consumer.js",
     "test:e2e": "node scripts/test-e2e.js",
     "test:e2e:ecosystem": "npm run build && node scripts/test-ecosystem-e2e.js",
     "test:e2e:redis": "node scripts/test-redis-e2e.js",
