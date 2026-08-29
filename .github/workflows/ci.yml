@@ -68,6 +68,21 @@ jobs:
       - run: npm ci
       - run: npm run test:compat -- --lane ${{ matrix.lane }}
 
+  package-smoke:
+    name: Actual tarball package smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+      - run: npm run test:package
+
   e2e:
     runs-on: ubuntu-latest
     services:

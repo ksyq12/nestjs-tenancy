@@ -34,6 +34,44 @@ jobs:
       - run: npm run test:cov
       - run: npm run build
 
+  compat:
+    name: Packed consumer (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane:
+          - nest10-prisma6
+          - nest10-prisma7
+          - nest11-prisma6
+          - nest11-prisma7
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+      - run: npm run test:compat -- --lane ${{ matrix.lane }}
+
+  package-smoke:
+    name: Actual tarball package smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          check-latest: true
+          cache: npm
+
+      - run: npm ci
+      - run: npm run test:package
+
   e2e:
     runs-on: ubuntu-latest
     services:
@@ -139,7 +177,7 @@ jobs:
           APP_DATABASE_URL: postgresql://ecosystem_app:ecosystem_app@127.0.0.1:5433/tenancy_test
 
   publish:
-    needs: [test, e2e, pgbouncer-e2e, redis-e2e, ecosystem-e2e]
+    needs: [test, compat, package-smoke, e2e, pgbouncer-e2e, redis-e2e, ecosystem-e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -147,12 +185,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
           check-latest: true
           registry-url: https://registry.npmjs.org
+
+      - name: Verify release provenance
+        run: node scripts/verify-release.js
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TARGET: ${{ github.event.release.target_commitish }}
+          RELEASE_REF: ${{ github.ref }}
 
       - run: npm ci
       - run: npm run build
