@@ -50,7 +50,9 @@ describe('CLI init', () => {
     expect(fs.existsSync(sqlPath)).toBe(true);
 
     const sql = fs.readFileSync(sqlPath, 'utf-8');
-    expect(sql).toContain('ALTER TABLE "User" ENABLE ROW LEVEL SECURITY');
+    expect(sql).toContain(
+      'ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY',
+    );
     expect(sql).toContain('app.current_tenant');
   });
 
@@ -453,9 +455,13 @@ describe('CLI init', () => {
 
     const sql = fs.readFileSync(path.join(tmpDir, 'tenancy-setup.sql'), 'utf-8');
     // Country should NOT have RLS policies (it's shared)
-    expect(sql).not.toContain('ALTER TABLE "Country" ENABLE ROW LEVEL SECURITY');
+    expect(sql).not.toContain(
+      'ALTER TABLE "public"."Country" ENABLE ROW LEVEL SECURITY',
+    );
     // User should have RLS policies
-    expect(sql).toContain('ALTER TABLE "User" ENABLE ROW LEVEL SECURITY');
+    expect(sql).toContain(
+      'ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY',
+    );
   });
 
   itWithTempDirectory('should log multi-schema info when models use @@schema()', async (tmpDir) => {

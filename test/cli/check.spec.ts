@@ -53,6 +53,24 @@ model Post {
     expect(result.extraPolicies).toHaveLength(0);
   });
 
+  it('should accept generated SQL with CRLF line endings', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(/\n/g, '\r\n'));
+
+    expect(runCheck({ cwd: tmpDir }).inSync).toBe(true);
+  });
+
   it('should detect missing policies', () => {
     writeSchema(`
 model User {
@@ -101,7 +119,7 @@ model User {
 
     const result = runCheck({ cwd: tmpDir });
     expect(result.inSync).toBe(false);
-    expect(result.extraPolicies).toContain('"DeletedModel"');
+    expect(result.extraPolicies).toContain('"public"."DeletedModel"');
   });
 
   it('should handle shared models correctly', () => {
@@ -131,6 +149,42 @@ model Country {
     expect(result.inSync).toBe(true);
   });
 
+  it('should not treat a lone shared-model comment as complete setup', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    writeSql('-- User (shared model)');
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.missingPolicies).toContain('"User"');
+  });
+
+  it('should reject an unqualified shared-model grant in generated boundaries', () => {
+    writeSchema(`
+model Country {
+  id String @id
+  code String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'Country', tableName: 'Country' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: ['Country'],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.split('"public"."Country"').join('"Country"'));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unqualified generated table target'),
+    );
+  });
+
   it('should handle schema-qualified names', () => {
     writeSchema(`
 model User {
@@ -158,7 +212,7 @@ model User {
 model LedgerEntry {
   id String @id
   tenant_id String
-  @@schema("tenant\"ops")
+  @@schema("tenant\"ops$tenancy_policy$$tenancy_identifier$")
   @@map("ledger;current_setting(fake, true)--archive\nnext")
 }
     `);
@@ -166,7 +220,7 @@ model LedgerEntry {
     const sql = generateSetupSql({
       models: [{
         modelName: 'LedgerEntry',
-        schemaName: 'tenant"ops',
+        schemaName: 'tenant"ops$tenancy_policy$$tenancy_identifier$',
         tableName: 'ledger;current_setting(fake, true)--archive\nnext',
       }],
       dbSettingKey: 'app.current_tenant',
@@ -200,6 +254,214 @@ model User {
     const result = runCheck({ cwd: tmpDir });
     expect(result.inSync).toBe(true);
     expect(result.extraPolicies).toHaveLength(0);
+  });
+
+  it('should reject unqualified public targets inside generated boundaries', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.split('"public"."User"').join('"User"'));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unqualified generated table target'),
+    );
+  });
+
+  it.each([
+    ['BEGIN', '\nBEGIN;\n'],
+    ['COMMIT', '\nCOMMIT;\n'],
+  ])('should reject generated SQL without its %s boundary', (_boundary, token) => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(token, '\n'));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('BEGIN/COMMIT transaction envelope'),
+    );
+  });
+
+  it.each([
+    ['start', '-- BEGIN GENERATED TENANCY SQL'],
+    ['end', '-- END GENERATED TENANCY SQL'],
+  ])('should reject a generated file missing its %s marker', (_label, marker) => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql
+      .replace('COMMIT;', 'ALTER ROLE app_user BYPASSRLS;\nCOMMIT;')
+      .replace(marker, ''));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('boundary markers'),
+    );
+  });
+
+  it('should reject duplicate generated boundary markers', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    const marker = '-- BEGIN GENERATED TENANCY SQL';
+    writeSql(sql.replace(marker, `${marker}\n${marker}`));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('boundary markers'),
+    );
+  });
+
+  it('should reject unguarded policies inside generated boundaries', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    writeSql([
+      '-- BEGIN GENERATED TENANCY SQL',
+      'BEGIN;',
+      'ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY;',
+      'ALTER TABLE "public"."User" FORCE ROW LEVEL SECURITY;',
+      'CREATE INDEX tenancy_User_tenant_id_idx ON "public"."User" ("tenant_id");',
+      'CREATE POLICY tenant_isolation_User ON "public"."User"',
+      "  USING (\"tenant_id\" = current_setting('app.current_tenant', true)::text);",
+      'CREATE POLICY tenant_insert_User ON "public"."User" FOR INSERT',
+      "  WITH CHECK (\"tenant_id\" = current_setting('app.current_tenant', true)::text);",
+      'GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."User" TO app_user;',
+      'COMMIT;',
+      '-- END GENERATED TENANCY SQL',
+    ].join('\n'));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContain(
+      'Generated SQL: unguarded top-level CREATE POLICY',
+    );
+  });
+
+  it('should reject an unqualified application grant in generated boundaries', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(
+      'GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."User" TO app_user;',
+      'GRANT SELECT, INSERT, UPDATE, DELETE ON "User" TO app_user;',
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unqualified generated table target'),
+    );
+    expect(result.warnings).toContain(
+      '"public"."User": missing or invalid application table grant',
+    );
+  });
+
+  it('should reject allowed statement shapes that target non-model objects', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    const unexpectedTargets = [
+      'GRANT USAGE ON SCHEMA "private" TO app_user;',
+      'ALTER TABLE "private"."Secrets" FORCE ROW LEVEL SECURITY;',
+      'CREATE INDEX IF NOT EXISTS tenancy_private_secrets_idx ON "private"."Secrets" ("tenant_id");',
+      'GRANT SELECT, INSERT, UPDATE, DELETE ON "private"."Secrets" TO app_user;',
+      'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "private" TO app_user;',
+    ].join('\n');
+    writeSql(sql.replace('COMMIT;', `${unexpectedTargets}\nCOMMIT;`));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContain(
+      'Generated SQL: unexpected table or schema target',
+    );
+  });
+
+  it('should reject a generated section missing a required schema grant', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(
+      'GRANT USAGE ON SCHEMA "public" TO app_user;\n',
+      '',
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContain(
+      'Generated SQL: missing required schema grant',
+    );
   });
 
   it('should not parse SQL comments as part of RLS table names', () => {
@@ -294,7 +556,7 @@ model User {
     );
   });
 
-  it('should recognize a valid tagged dollar-quoted string', () => {
+  it('should lex a valid tagged string before rejecting its unsupported statement', () => {
     writeSchema(`
 model User {
   id String @id
@@ -308,13 +570,281 @@ model User {
       tenantIdField: 'tenant_id',
     });
     writeSql(sql.replace(
-      '-- END GENERATED TENANCY SQL',
-      'SELECT $tag$x$tag$;\n-- END GENERATED TENANCY SQL',
+      'COMMIT;',
+      'SELECT $tag$x$tag$;\nCOMMIT;',
     ));
 
     const result = runCheck({ cwd: tmpDir });
-    expect(result.inSync).toBe(true);
-    expect(result.warnings).toHaveLength(0);
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).not.toContain(
+      'Invalid or unsupported SQL lexical structure',
+    );
+    expect(result.warnings).toContain(
+      'Generated SQL: unsupported top-level statement',
+    );
+  });
+
+  it.each([
+    ['rollback', 'ROLLBACK;'],
+    ['transaction split', 'commit;\nbegin;'],
+  ])('should reject a generated-section %s command', (_label, command) => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace('COMMIT;', `${command}\nCOMMIT;`));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContain(
+      'Generated SQL: unsupported top-level statement',
+    );
+  });
+
+  it('should reject a function-hidden RLS mutation in generated SQL', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    const hiddenMutation = [
+      'CREATE OR REPLACE FUNCTION m16a_hidden_mutation() RETURNS void',
+      'LANGUAGE plpgsql AS $hidden_function$',
+      'BEGIN',
+      '  EXECUTE \'ALTER TABLE "public"."User" DISABLE ROW LEVEL SECURITY\';',
+      'END',
+      '$hidden_function$;',
+      'SELECT m16a_hidden_mutation();',
+      'DROP FUNCTION m16a_hidden_mutation();',
+    ].join('\n');
+    writeSql(sql.replace('COMMIT;', `${hiddenMutation}\nCOMMIT;`));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContain(
+      'Generated SQL: unsupported top-level statement',
+    );
+  });
+
+  it('should fail closed for a hidden mutation in an otherwise canonical DO block', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    const hiddenMutation = [
+      'DO $hidden_mutation$',
+      'BEGIN',
+      '  EXECUTE \'ALTER TABLE "public"."User" DISABLE ROW LEVEL SECURITY\';',
+      'END',
+      '$hidden_mutation$;',
+    ].join('\n');
+    writeSql(sql.replace(
+      'COMMIT;',
+      `${hiddenMutation}\nCOMMIT;`,
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+  });
+
+  it('should not accept policy evidence from a non-canonical DO body', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    writeSql([
+      'ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;',
+      'ALTER TABLE "User" FORCE ROW LEVEL SECURITY;',
+      'CREATE INDEX tenancy_User_tenant_id_idx ON "User" ("tenant_id");',
+      'DO $unverified_policy$',
+      'BEGIN',
+      '  CREATE POLICY tenant_isolation_User ON "User"',
+      "    USING (\"tenant_id\" = current_setting('app.current_tenant', true)::text);",
+      '  CREATE POLICY tenant_insert_User ON "User"',
+      "    FOR INSERT WITH CHECK (\"tenant_id\" = current_setting('app.current_tenant', true)::text);",
+      'END',
+      '$unverified_policy$;',
+    ].join('\n'));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('invalid tenant_isolation'),
+    );
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('invalid tenant_insert'),
+    );
+  });
+
+  it('should reject a generated policy guard targeting another schema', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(
+      'WHERE n.nspname = $tenancy_identifier$public$tenancy_identifier$',
+      'WHERE n.nspname = $tenancy_identifier$other$tenancy_identifier$',
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('invalid tenant_isolation'),
+    );
+  });
+
+  it('should reject standard-quoted schema identifiers inside a policy guard', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(
+      'WHERE n.nspname = $tenancy_identifier$public$tenancy_identifier$',
+      "WHERE n.nspname = 'public'",
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+  });
+
+  it('should reject a dollar-quoted policy name inside a policy guard', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(
+      "'tenant_isolation_user'::pg_catalog.name",
+      '$policy$tenant_isolation_user$policy$::pg_catalog.name',
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+  });
+
+  it('should reject a non-standard setting literal inside a policy guard', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    writeSql(sql.replace(
+      "current_setting('app.current_tenant', true)",
+      'current_setting($setting$app.current_tenant$setting$, true)',
+    ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('invalid tenant_isolation'),
+    );
+  });
+
+  it('should reject an overlong schema literal inside a policy guard', () => {
+    writeSchema(`
+model User {
+  id String @id
+  tenant_id String
+}
+    `);
+    const sql = generateSetupSql({
+      models: [{ modelName: 'User', tableName: 'User' }],
+      dbSettingKey: 'app.current_tenant',
+      sharedModels: [],
+      tenantIdField: 'tenant_id',
+    });
+    const overlongSchema = 's'.repeat(64);
+    writeSql(sql
+      .replace(
+        'WHERE n.nspname = $tenancy_identifier$public$tenancy_identifier$',
+        `WHERE n.nspname = $tenancy_identifier$${overlongSchema}$tenancy_identifier$`,
+      )
+      .replace(
+        'CREATE POLICY tenant_isolation_User ON "public"."User"',
+        `CREATE POLICY tenant_isolation_User ON "${overlongSchema}"."User"`,
+      ));
+
+    const result = runCheck({ cwd: tmpDir });
+    expect(result.inSync).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('unsupported or non-canonical DO block'),
+    );
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('invalid tenant_isolation'),
+    );
   });
 
   it('should return not in sync when schema.prisma is missing', () => {
@@ -473,7 +1003,7 @@ model User {
         tenantIdField: 'tenant_id',
       });
       const additionalPolicy = [
-        'CREATE POLICY auxiliary_tenant_policy ON "User" AS PERMISSIVE FOR SELECT',
+        'CREATE POLICY auxiliary_tenant_policy ON "public"."User" AS PERMISSIVE FOR SELECT',
         "  USING (\"tenant_id\" = current_setting('app.current_tenant', true)::text);",
       ].join('\n');
       writeSql(sql.replace(
@@ -483,8 +1013,8 @@ model User {
 
       const result = runCheck({ cwd: tmpDir });
       expect(result.inSync).toBe(false);
-      expect(result.warnings).toContainEqual(
-        expect.stringContaining('unexpected permissive policy'),
+      expect(result.warnings).toContain(
+        '"public"."User": unexpected permissive policy',
       );
     });
 

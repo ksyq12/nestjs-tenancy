@@ -1197,6 +1197,41 @@ This generates:
 - `tenancy-setup.sql` — PostgreSQL RLS policies, tenant indexes, roles, and grants
 - `tenancy.module-setup.ts` — NestJS module registration code
 
+Run `tenancy-setup.sql` as a standalone migration with a client that stops on the
+first SQL error. For `psql`, use:
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -f tenancy-setup.sql "$DATABASE_URL"
+```
+
+`-X` ignores settings in `.psqlrc`. Do not run this script with
+`ON_ERROR_ROLLBACK=on`: its per-statement savepoints can let execution continue
+to the final `COMMIT` after an error. Other clients must also stop on the first
+error and then issue `ROLLBACK` or close the connection. Under that execution
+contract, the generated `BEGIN` / `COMMIT` makes its roles, grants, indexes, RLS
+flags, and policies all-or-nothing. Do not nest the script inside a caller-owned
+transaction. Its `ALTER TABLE` statements hold table locks until commit, so
+schedule large production schemas in an appropriate maintenance window.
+
+Models without `@@schema` are emitted as explicitly qualified
+`"public"."Table"` targets, so `search_path` cannot redirect the generated DDL
+to a shadow table. Inside a generated section, `tenancy check` requires the
+intact boundary markers, transaction envelope, guarded policies, and model-bound
+table/schema targets. It also flags unqualified targets; declare `@@schema` for
+every non-public model.
+
+The same generated script is safe to reapply sequentially; concurrent applies
+are not part of this guarantee. Existing policies with the generated table/name
+pair are preserved instead of being dropped or rewritten, including policies
+that have drifted from the generated expression. Use `tenancy doctor` against
+the application role to detect applied policy drift. When replacement is
+intentional, review the live policy and place an explicit `DROP POLICY` directly
+after `BEGIN` in a temporary reviewed execution copy of the generated
+transaction. Do not keep that state-reversing statement in the canonical
+`tenancy-setup.sql`; `tenancy check` intentionally rejects it. Running the
+temporary copy with the fail-fast contract makes the drop and recreation atomic;
+a separate autocommitted drop can leave a policy gap if the later setup fails.
+
 Preview without writing files:
 
 ```bash

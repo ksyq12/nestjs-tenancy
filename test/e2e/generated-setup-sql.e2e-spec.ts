@@ -1,27 +1,62 @@
 import { Client } from 'pg';
 import { generateSetupSql } from '../../src/cli/templates/setup-sql';
+import {
+  DoctorExitCode,
+  DoctorResult,
+  runDoctor,
+} from '../../src/cli/doctor';
+import { quoteSqlIdentifier } from '../../src/postgres-safety';
 
 const ADMIN_URL =
   process.env.DATABASE_URL ??
   'postgresql://tenancy:tenancy@localhost:5433/tenancy_test';
-const SCHEMA_NAME = 'tenant"ops';
-const TABLE_NAME = 'ledger;archive';
+const SCHEMA_NAME = 'tenant\\"ops';
+const TABLE_NAME = 'Ledger$tenancy_policy$;archive';
 const TENANT_COLUMN = 'tenant"id';
+const SCHEMA_SQL = quoteSqlIdentifier(SCHEMA_NAME);
+const TABLE_SQL = quoteSqlIdentifier(TABLE_NAME);
+const TENANT_COLUMN_SQL = quoteSqlIdentifier(TENANT_COLUMN);
+const APP_ROLE = 'app_user';
+const APP_URL =
+  process.env.APP_DATABASE_URL ??
+  'postgresql://app_user:app_user@localhost:5433/tenancy_test';
+const TENANT_A = '11111111-1111-1111-1111-111111111111';
+const TENANT_B = '22222222-2222-2222-2222-222222222222';
+
+function expectHealthyDoctor(result: DoctorResult): void {
+  expect(result.status).toBe('healthy');
+  expect(result.exitCode).toBe(DoctorExitCode.HEALTHY);
+  for (const id of [
+    'catalog.rls_forced',
+    'policy.isolation_contract',
+    'policy.insert_contract',
+    'probe.no_context',
+    'probe.tenant_a',
+    'probe.cleanup_after_commit',
+    'probe.tenant_b',
+    'probe.cleanup_after_rollback',
+  ]) {
+    expect(result.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id, status: 'pass' }),
+    ]));
+  }
+}
 
 describe('generated setup SQL', () => {
-  it('applies safely to mapped identifiers in disposable PostgreSQL', async () => {
+  it('applies twice safely to mapped identifiers in disposable PostgreSQL', async () => {
     const client = new Client({ connectionString: ADMIN_URL });
     await client.connect();
 
     try {
-      await client.query('DROP SCHEMA IF EXISTS "tenant""ops" CASCADE');
+      await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA_SQL} CASCADE`);
       await client.query(`
-        CREATE SCHEMA "tenant""ops";
-        CREATE TABLE "tenant""ops"."ledger;archive" (
+        CREATE SCHEMA ${SCHEMA_SQL};
+        CREATE TABLE ${SCHEMA_SQL}.${TABLE_SQL} (
           id integer PRIMARY KEY,
-          "tenant""id" text NOT NULL
+          ${TENANT_COLUMN_SQL} text NOT NULL
         );
       `);
+      await client.query('SET standard_conforming_strings = off');
 
       const sql = generateSetupSql({
         models: [{
@@ -33,6 +68,19 @@ describe('generated setup SQL', () => {
         sharedModels: [],
         tenantIdField: TENANT_COLUMN,
       });
+      await client.query(sql);
+
+      const initialPolicies = await client.query<{
+        oid: string;
+        policy_name: string;
+      }>(`
+        SELECT p.oid::text AS oid, p.polname AS policy_name
+        FROM pg_catalog.pg_policy AS p
+        JOIN pg_catalog.pg_class AS c ON c.oid = p.polrelid
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+        ORDER BY p.polname
+      `, [SCHEMA_NAME, TABLE_NAME]);
       await client.query(sql);
 
       const table = await client.query<{
@@ -71,17 +119,21 @@ describe('generated setup SQL', () => {
       );
       expect(schemaGrant.rows[0]?.has_usage).toBe(true);
 
-      const policies = await client.query<{ policy_name: string }>(`
-        SELECT p.polname AS policy_name
+      const policies = await client.query<{
+        oid: string;
+        policy_name: string;
+      }>(`
+        SELECT p.oid::text AS oid, p.polname AS policy_name
         FROM pg_catalog.pg_policy AS p
         JOIN pg_catalog.pg_class AS c ON c.oid = p.polrelid
         JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
         WHERE n.nspname = $1 AND c.relname = $2
         ORDER BY p.polname
       `, [SCHEMA_NAME, TABLE_NAME]);
+      expect(policies.rows).toEqual(initialPolicies.rows);
       expect(policies.rows.map(({ policy_name }) => policy_name)).toEqual([
-        'tenant_insert_tenant_ops_ledger_archive',
-        'tenant_isolation_tenant_ops_ledger_archive',
+        'tenant_insert_tenant__ops_ledger_tenancy_policy__archive',
+        'tenant_isolation_tenant__ops_ledger_tenancy_policy__archive',
       ]);
 
       const index = await client.query<{ has_tenant_index: boolean }>(`
@@ -100,7 +152,300 @@ describe('generated setup SQL', () => {
       expect(index.rows[0]?.has_tenant_index).toBe(true);
     } finally {
       try {
-        await client.query('DROP SCHEMA IF EXISTS "tenant""ops" CASCADE');
+        await client.query('ROLLBACK');
+        await client.query('RESET standard_conforming_strings');
+        await client.query(`DROP SCHEMA IF EXISTS ${SCHEMA_SQL} CASCADE`);
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
+  it('targets public instead of a search_path shadow and reapplies safely', async () => {
+    const shadowSchema = 'generated_m16a_shadow';
+    const tableName = 'm16a_search_path_accounts';
+    const client = new Client({ connectionString: ADMIN_URL });
+    await client.connect();
+
+    try {
+      await client.query(`
+        DROP TABLE IF EXISTS public.${tableName} CASCADE;
+        DROP SCHEMA IF EXISTS ${shadowSchema} CASCADE;
+        CREATE SCHEMA ${shadowSchema};
+        CREATE TABLE public.${tableName} (
+          id integer PRIMARY KEY,
+          tenant_id text NOT NULL
+        );
+        CREATE TABLE ${shadowSchema}.${tableName} (
+          id integer PRIMARY KEY,
+          tenant_id text NOT NULL
+        );
+        SET search_path TO ${shadowSchema}, public;
+      `);
+
+      const sql = generateSetupSql({
+        models: [{
+          modelName: 'SearchPathAccount',
+          tableName,
+        }],
+        dbSettingKey: 'app.generated_tenant',
+        sharedModels: [],
+        tenantIdField: 'tenant_id',
+      });
+      await client.query(sql);
+      await client.query(sql);
+
+      const relations = await client.query<{
+        schema_name: string;
+        relrowsecurity: boolean;
+        relforcerowsecurity: boolean;
+        policy_count: number;
+        can_select: boolean;
+      }>(`
+        SELECT
+          n.nspname AS schema_name,
+          c.relrowsecurity,
+          c.relforcerowsecurity,
+          (
+            SELECT count(*)::int
+            FROM pg_catalog.pg_policy AS p
+            WHERE p.polrelid = c.oid
+          ) AS policy_count,
+          pg_catalog.has_table_privilege(
+            'app_user', c.oid, 'SELECT'
+          ) AS can_select
+        FROM pg_catalog.pg_class AS c
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE n.nspname IN ($1, 'public')
+          AND c.relname = $2
+          AND c.relkind = 'r'
+        ORDER BY n.nspname
+      `, [shadowSchema, tableName]);
+      expect(relations.rows).toEqual([
+        {
+          schema_name: shadowSchema,
+          relrowsecurity: false,
+          relforcerowsecurity: false,
+          policy_count: 0,
+          can_select: false,
+        },
+        {
+          schema_name: 'public',
+          relrowsecurity: true,
+          relforcerowsecurity: true,
+          policy_count: 2,
+          can_select: true,
+        },
+      ]);
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+        await client.query('RESET search_path');
+        await client.query(`DROP TABLE IF EXISTS public.${tableName} CASCADE`);
+        await client.query(`DROP SCHEMA IF EXISTS ${shadowSchema} CASCADE`);
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
+  it('preserves policy drift on reapply until replacement is explicit', async () => {
+    const schemaName = 'generated_m16a';
+    const tableName = 'accounts';
+    const settingKey = 'app.generated_tenant';
+    const isolationPolicy = 'tenant_isolation_generated_m16a_accounts';
+    const client = new Client({ connectionString: ADMIN_URL });
+    await client.connect();
+
+    try {
+      await client.query(`
+        DROP SCHEMA IF EXISTS ${schemaName} CASCADE;
+        CREATE SCHEMA ${schemaName};
+        CREATE TABLE ${schemaName}.${tableName} (
+          id integer PRIMARY KEY,
+          tenant_id text NOT NULL
+        );
+        INSERT INTO ${schemaName}.${tableName} (id, tenant_id) VALUES
+          (1, '${TENANT_A}'),
+          (2, '${TENANT_B}');
+      `);
+
+      const sql = generateSetupSql({
+        models: [{
+          modelName: 'Account',
+          schemaName,
+          tableName,
+        }],
+        dbSettingKey: settingKey,
+        sharedModels: [],
+        tenantIdField: 'tenant_id',
+      });
+
+      await client.query(sql);
+      const healthyAfterFirstApply = await runDoctor({
+        url: APP_URL,
+        table: `${schemaName}.${tableName}`,
+        role: APP_ROLE,
+        dbSettingKey: settingKey,
+        active: true,
+        tenantA: TENANT_A,
+        tenantB: TENANT_B,
+      });
+      expectHealthyDoctor(healthyAfterFirstApply);
+
+      await client.query(sql);
+
+      const healthyAfterReapply = await runDoctor({
+        url: APP_URL,
+        table: `${schemaName}.${tableName}`,
+        role: APP_ROLE,
+        dbSettingKey: settingKey,
+        active: true,
+        tenantA: TENANT_A,
+        tenantB: TENANT_B,
+      });
+      expectHealthyDoctor(healthyAfterReapply);
+
+      await client.query(
+        `ALTER POLICY ${isolationPolicy} ON ${schemaName}.${tableName} USING (true)`,
+      );
+      await client.query(sql);
+
+      const driftAfterReapply = await runDoctor({
+        url: APP_URL,
+        table: `${schemaName}.${tableName}`,
+        role: APP_ROLE,
+        dbSettingKey: settingKey,
+      });
+      expect(driftAfterReapply.status).toBe('unhealthy');
+      expect(driftAfterReapply.exitCode).toBe(DoctorExitCode.FINDINGS);
+      expect(driftAfterReapply.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'policy.isolation_contract',
+          status: 'fail',
+        }),
+      ]));
+
+      const explicitReplacementSql = sql.replace(
+        '\nBEGIN;\n',
+        `\nBEGIN;\nDROP POLICY ${isolationPolicy} ON ${schemaName}.${tableName};\n`,
+      );
+      expect(explicitReplacementSql).not.toBe(sql);
+      await client.query(explicitReplacementSql);
+
+      const healthyAfterExplicitReplacement = await runDoctor({
+        url: APP_URL,
+        table: `${schemaName}.${tableName}`,
+        role: APP_ROLE,
+        dbSettingKey: settingKey,
+        active: true,
+        tenantA: TENANT_A,
+        tenantB: TENANT_B,
+      });
+      expectHealthyDoctor(healthyAfterExplicitReplacement);
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+        await client.query(`DROP SCHEMA IF EXISTS generated_m16a CASCADE`);
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
+  it('rolls back earlier generated changes when a later model fails', async () => {
+    const schemaName = 'generated_m16a_rollback';
+    const readyTable = 'ready_accounts';
+    const missingModelMarker = '\n-- MissingAccount\n';
+    const client = new Client({ connectionString: ADMIN_URL });
+    await client.connect();
+
+    try {
+      await client.query(`
+        DROP SCHEMA IF EXISTS ${schemaName} CASCADE;
+        CREATE SCHEMA ${schemaName};
+        CREATE TABLE ${schemaName}.${readyTable} (
+          id integer,
+          tenant_id text NOT NULL
+        );
+      `);
+
+      const sql = generateSetupSql({
+        models: [
+          {
+            modelName: 'ReadyAccount',
+            schemaName,
+            tableName: readyTable,
+          },
+          {
+            modelName: 'MissingAccount',
+            schemaName,
+            tableName: 'missing_accounts',
+          },
+        ],
+        dbSettingKey: 'app.generated_tenant',
+        sharedModels: [],
+        tenantIdField: 'tenant_id',
+      });
+      const failureStart = sql.indexOf(missingModelMarker);
+      expect(failureStart).toBeGreaterThan(0);
+
+      await client.query(sql.slice(0, failureStart));
+      await expect(client.query(sql.slice(failureStart))).rejects.toThrow(
+        /missing_accounts.+does not exist/i,
+      );
+      await client.query('ROLLBACK');
+
+      const table = await client.query<{
+        relrowsecurity: boolean;
+        relforcerowsecurity: boolean;
+        can_select: boolean;
+      }>(`
+        SELECT
+          c.relrowsecurity,
+          c.relforcerowsecurity,
+          pg_catalog.has_table_privilege(
+            'app_user', c.oid, 'SELECT'
+          ) AS can_select
+        FROM pg_catalog.pg_class AS c
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2
+      `, [schemaName, readyTable]);
+      expect(table.rows).toEqual([{
+        relrowsecurity: false,
+        relforcerowsecurity: false,
+        can_select: false,
+      }]);
+
+      const generatedObjects = await client.query<{ object_count: string }>(`
+        SELECT (
+          SELECT count(*)
+          FROM pg_catalog.pg_policy AS p
+          JOIN pg_catalog.pg_class AS c ON c.oid = p.polrelid
+          JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+          WHERE n.nspname = $1 AND c.relname = $2
+        ) + (
+          SELECT count(*)
+          FROM pg_catalog.pg_index AS i
+          JOIN pg_catalog.pg_class AS c ON c.oid = i.indrelid
+          JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+          WHERE n.nspname = $1 AND c.relname = $2
+        ) AS object_count
+      `, [schemaName, readyTable]);
+      expect(generatedObjects.rows[0]?.object_count).toBe('0');
+
+      const schemaGrant = await client.query<{ has_usage: boolean }>(`
+        SELECT pg_catalog.has_schema_privilege(
+          'app_user', $1, 'USAGE'
+        ) AS has_usage
+      `, [schemaName]);
+      expect(schemaGrant.rows[0]?.has_usage).toBe(false);
+    } finally {
+      try {
+        await client.query('ROLLBACK');
+        await client.query(
+          `DROP SCHEMA IF EXISTS generated_m16a_rollback CASCADE`,
+        );
       } finally {
         await client.end();
       }

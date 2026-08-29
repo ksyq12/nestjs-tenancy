@@ -25,6 +25,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Preserved synchronous tenant-scoped cache keys for `@nestjs/cache-manager` 2.x while retaining asynchronous base-key support for 3.x, preventing a Promise object from being passed to 2.x cache stores as the key.
+- Wrapped CLI-generated tenancy SQL in an explicit transaction that is atomic under the documented fail-fast client contract and safe to reapply sequentially. Existing same-table/name policies are preserved for live `doctor` drift review; an operator can place an explicit drop inside a reviewed transaction when replacement is intended.
+- Qualified models without `@@schema` as `public` targets so `search_path` cannot redirect generated DDL, and made catalog guards independent of `standard_conforming_strings` for mapped identifiers.
+- Kept `tenancy check` compatible with catalog-guarded policy blocks while accepting policy evidence inside `DO` only when the entire block has the canonical guard shape, and rejecting broken markers, a missing transaction envelope, unsupported statements, unguarded policies, non-model targets, or unqualified targets in generated sections.
 
 ### Security
 
@@ -36,6 +39,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Added an isolated actual-tarball consumer smoke for the root, cache, and testing runtime/declaration exports; the cache-free root import; and the installed CLI bin, shebang, help, and invalid-invocation exit contract.
 - Added Kafka string/Buffer, gRPC metadata, and Bull data validator coverage for valid, invalid, missing, async, cancellation, context isolation, and redacted diagnostics paths.
 - Required the Prisma CLI, client, and PostgreSQL adapter to use one identical version before PgBouncer E2E starts, and moved the Prisma 7 consumer and pooler lanes to exact 7.10.0.
+- Added real PostgreSQL coverage for generated SQL double apply, preserved policy drift and explicit replacement, post-reapply active doctor isolation, rollback of earlier models after a later failure, `search_path` shadowing, and mapped identifiers with non-standard string settings.
 
 ### Documentation
 

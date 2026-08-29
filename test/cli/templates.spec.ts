@@ -36,6 +36,23 @@ describe('generateSetupSql', () => {
     expect(sql).toContain('-- END GENERATED TENANCY SQL');
   });
 
+  it('should make the generated block an explicit transaction', () => {
+    const sql = generateSetupSql(baseOptions);
+    const beginMarker = sql.indexOf('-- BEGIN GENERATED TENANCY SQL');
+    const begin = sql.indexOf('BEGIN;');
+    const commit = sql.indexOf('COMMIT;');
+    const endMarker = sql.indexOf('-- END GENERATED TENANCY SQL');
+
+    expect(beginMarker).toBeGreaterThanOrEqual(0);
+    expect(begin).toBeGreaterThan(beginMarker);
+    expect(commit).toBeGreaterThan(begin);
+    expect(endMarker).toBeGreaterThan(commit);
+    expect(sql.match(/^BEGIN;$/gm)).toHaveLength(1);
+    expect(sql.match(/^COMMIT;$/gm)).toHaveLength(1);
+    expect(sql).toContain('-X -v ON_ERROR_STOP=1');
+    expect(sql).toContain('not ON_ERROR_ROLLBACK=on');
+  });
+
   it('should include tenant_id warning comment in header', () => {
     const sql = generateSetupSql(baseOptions);
     expect(sql).toContain("-- IMPORTANT: This script assumes all non-shared models have a 'tenant_id' column.");
@@ -53,13 +70,65 @@ describe('generateSetupSql', () => {
       models: [{ modelName: 'User', tableName: 'User' }],
     };
     const sql = generateSetupSql(options);
-    expect(sql).toContain('ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;');
-    expect(sql).toContain('ALTER TABLE "User" FORCE ROW LEVEL SECURITY;');
-    expect(sql).toContain('CREATE POLICY tenant_isolation_User ON "User"');
+    expect(sql).toContain('ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('ALTER TABLE "public"."User" FORCE ROW LEVEL SECURITY;');
+    expect(sql).toContain('CREATE POLICY tenant_isolation_User ON "public"."User"');
     expect(sql).toContain("current_setting('app.current_tenant', true)::text");
-    expect(sql).toContain('CREATE POLICY tenant_insert_User ON "User"');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" ("tenant_id");');
-    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "User" TO app_user;');
+    expect(sql).toContain('CREATE POLICY tenant_insert_User ON "public"."User"');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "public"."User" ("tenant_id");');
+    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."User" TO app_user;');
+  });
+
+  it('should preserve existing generated policies for drift review on reapply', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: [{ modelName: 'User', tableName: 'User' }],
+    });
+
+    expect(sql).toContain('FROM pg_catalog.pg_policy AS p');
+    expect(sql).toContain(
+      'n.nspname = $tenancy_identifier$public$tenancy_identifier$',
+    );
+    expect(sql).toContain(
+      'c.relname = $tenancy_identifier$User$tenancy_identifier$',
+    );
+    expect(sql).toContain(
+      "p.polname = 'tenant_isolation_user'::pg_catalog.name",
+    );
+    expect(sql).toContain(
+      "p.polname = 'tenant_insert_user'::pg_catalog.name",
+    );
+    expect(sql).not.toMatch(/^DROP POLICY/m);
+    expect(sql).toMatch(/existing policies.+preserved/i);
+    expect(sql).toMatch(/atomic replacement.+explicit.+DROP POLICY/i);
+  });
+
+  it('should choose a dollar-quote tag absent from mapped identifiers', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: [{
+        modelName: 'LedgerEntry',
+        tableName: 'ledger$tenancy_policy$archive',
+      }],
+    });
+
+    expect(sql).toContain('DO $tenancy_policy_1$');
+    expect(sql).toContain('ON "public"."ledger$tenancy_policy$archive"');
+  });
+
+  it('should choose a guard literal tag absent from mapped identifiers', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: [{
+        modelName: 'LedgerEntry',
+        schemaName: 'ops$tenancy_identifier$archive',
+        tableName: 'ledger',
+      }],
+    });
+
+    expect(sql).toContain(
+      'n.nspname = $tenancy_identifier_1$ops$tenancy_identifier$archive$tenancy_identifier_1$',
+    );
   });
 
   it('should use custom dbSettingKey in policies', () => {
@@ -127,9 +196,9 @@ describe('generateSetupSql', () => {
       models: [{ modelName: 'User', tableName: 'users' }],
     };
     const sql = generateSetupSql(options);
-    expect(sql).toContain('ALTER TABLE "users" ENABLE ROW LEVEL SECURITY;');
-    expect(sql).toContain('ALTER TABLE "users" FORCE ROW LEVEL SECURITY;');
-    expect(sql).toContain('CREATE POLICY tenant_isolation_users ON "users"');
+    expect(sql).toContain('ALTER TABLE "public"."users" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('ALTER TABLE "public"."users" FORCE ROW LEVEL SECURITY;');
+    expect(sql).toContain('CREATE POLICY tenant_isolation_users ON "public"."users"');
     expect(sql).not.toContain('"User"');
   });
 
@@ -141,7 +210,7 @@ describe('generateSetupSql', () => {
     };
     const sql = generateSetupSql(options);
     expect(sql).toContain('-- Country (shared model)');
-    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "Country" TO app_user;');
+    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."Country" TO app_user;');
     expect(sql).not.toContain('ENABLE ROW LEVEL SECURITY');
     expect(sql).not.toContain('CREATE INDEX IF NOT EXISTS tenancy_Country_tenant_id_idx');
   });
@@ -156,7 +225,7 @@ describe('generateSetupSql', () => {
       sharedModels: ['Country'],
     };
     const sql = generateSetupSql(options);
-    expect(sql).toContain('ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY;');
     expect(sql).toContain('-- Country (shared model)');
     expect(sql).not.toContain('ALTER TABLE "Country" ENABLE ROW LEVEL SECURITY');
   });
@@ -176,7 +245,7 @@ describe('generateSetupSql', () => {
     };
     const sql = generateSetupSql(options);
     expect(sql).toContain('"org_id" = current_setting');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_orders_org_id_idx ON "orders" ("org_id");');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_orders_org_id_idx ON "public"."orders" ("org_id");');
   });
 
   it('should sanitize hyphenated table names in policy identifiers', () => {
@@ -185,10 +254,10 @@ describe('generateSetupSql', () => {
       models: [{ modelName: 'AuditLog', tableName: 'audit-logs' }],
     };
     const sql = generateSetupSql(options);
-    expect(sql).toContain('ALTER TABLE "audit-logs" ENABLE ROW LEVEL SECURITY;');
-    expect(sql).toContain('ALTER TABLE "audit-logs" FORCE ROW LEVEL SECURITY;');
-    expect(sql).toContain('CREATE POLICY tenant_isolation_audit_logs ON "audit-logs"');
-    expect(sql).toContain('CREATE POLICY tenant_insert_audit_logs ON "audit-logs"');
+    expect(sql).toContain('ALTER TABLE "public"."audit-logs" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('ALTER TABLE "public"."audit-logs" FORCE ROW LEVEL SECURITY;');
+    expect(sql).toContain('CREATE POLICY tenant_isolation_audit_logs ON "public"."audit-logs"');
+    expect(sql).toContain('CREATE POLICY tenant_insert_audit_logs ON "public"."audit-logs"');
     expect(sql).not.toContain('tenant_isolation_audit-logs');
     expect(sql).not.toContain('tenant_insert_audit-logs');
   });
@@ -241,7 +310,7 @@ describe('generateSetupSql', () => {
       };
       const sql = generateSetupSql(options);
       expect(sql).toContain('ALTER TABLE "auth"."users" ENABLE ROW LEVEL SECURITY;');
-      expect(sql).toContain('ALTER TABLE "posts" ENABLE ROW LEVEL SECURITY;');
+      expect(sql).toContain('ALTER TABLE "public"."posts" ENABLE ROW LEVEL SECURITY;');
       expect(sql).not.toContain('"auth"."posts"');
     });
 

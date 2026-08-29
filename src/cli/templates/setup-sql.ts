@@ -17,7 +17,7 @@ function qualifiedTableName(model: ParsedModel): string {
   if (model.schemaName) {
     return `${quoteSqlIdentifier(model.schemaName)}.${quoteSqlIdentifier(model.tableName)}`;
   }
-  return quoteSqlIdentifier(model.tableName);
+  return `${quoteSqlIdentifier('public')}.${quoteSqlIdentifier(model.tableName)}`;
 }
 
 function safeIdentifier(value: string): string {
@@ -33,6 +33,43 @@ function commentedSql(statement: string): string {
     .split(/\r\n|\r|\n/)
     .map((line) => `-- ${line}`)
     .join('\n');
+}
+
+function unusedDollarQuoteTag(value: string, base: string): string {
+  for (let suffix = 0; ; suffix++) {
+    const tag = suffix === 0 ? `$${base}$` : `$${base}_${suffix}$`;
+    if (!value.includes(tag)) return tag;
+  }
+}
+
+function dollarQuotedSqlLiteral(value: string): string {
+  const tag = unusedDollarQuoteTag(value, 'tenancy_identifier');
+  return `${tag}${value}${tag}`;
+}
+
+function createPolicyIfMissing(
+  policyName: string,
+  schemaName: string,
+  relationName: string,
+  statement: string[],
+): string[] {
+  const body = [
+    'BEGIN',
+    '  IF NOT EXISTS (',
+    '    SELECT 1',
+    '    FROM pg_catalog.pg_policy AS p',
+    '    JOIN pg_catalog.pg_class AS c ON c.oid = p.polrelid',
+    '    JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace',
+    `    WHERE n.nspname = ${dollarQuotedSqlLiteral(schemaName)}`,
+    `      AND c.relname = ${dollarQuotedSqlLiteral(relationName)}`,
+    `      AND p.polname = ${quoteSqlLiteral(policyName.toLowerCase())}::pg_catalog.name`,
+    '  ) THEN',
+    ...statement.map((line) => `    ${line}`),
+    '  END IF;',
+    'END',
+  ];
+  const tag = unusedDollarQuoteTag(body.join('\n'), 'tenancy_policy');
+  return [`DO ${tag}`, ...body, `${tag};`];
 }
 
 function validateOptions(options: SetupSqlOptions): void {
@@ -78,6 +115,14 @@ export function generateSetupSql(options: SetupSqlOptions): string {
     '-- Review and customize before running against your database.',
     `-- IMPORTANT: This script assumes all non-shared models have a '${sqlCommentText(tenantIdField)}' column.`,
     '-- Remove or modify policies for models that don\'t use tenant isolation.',
+    '-- Run this as a standalone script; the generated block uses one explicit transaction.',
+    '-- Use a fail-fast client; with psql, use -X -v ON_ERROR_STOP=1 and not ON_ERROR_ROLLBACK=on.',
+    '-- On error, issue ROLLBACK or close the session before running any other statement.',
+    '-- Existing policies with generated names are preserved during reapply so drift is not overwritten.',
+    '-- Review applied policy drift with `tenancy doctor`.',
+    '-- For atomic replacement, use a temporary reviewed copy with an explicit DROP POLICY after BEGIN.',
+    '',
+    'BEGIN;',
     '',
     '-- Create a non-superuser role for the application',
     "-- Set a strong password before using this role in production:",
@@ -120,24 +165,32 @@ export function generateSetupSql(options: SetupSqlOptions): string {
     const schemaPrefix = model.schemaName ? `${model.schemaName}_` : '';
     const safeName = safeIdentifier(`${schemaPrefix}${model.tableName}`);
     const safeTenantField = safeIdentifier(tenantIdField);
+    const isolationPolicy = `tenant_isolation_${safeName}`;
+    const insertPolicy = `tenant_insert_${safeName}`;
     lines.push(`-- ${sqlCommentText(model.modelName)}`);
     lines.push(`ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY;`);
     lines.push(`ALTER TABLE ${tableName} FORCE ROW LEVEL SECURITY;`);
     lines.push(
       `CREATE INDEX IF NOT EXISTS tenancy_${safeName}_${safeTenantField}_idx ON ${tableName} (${tenantColumn});`,
     );
-    lines.push(
-      `CREATE POLICY tenant_isolation_${safeName} ON ${tableName}`,
-    );
-    lines.push(
-      `  USING (${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text);`,
-    );
-    lines.push(
-      `CREATE POLICY tenant_insert_${safeName} ON ${tableName}`,
-    );
-    lines.push(
-      `  FOR INSERT WITH CHECK (${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text);`,
-    );
+    lines.push(...createPolicyIfMissing(
+      isolationPolicy,
+      model.schemaName ?? 'public',
+      model.tableName,
+      [
+        `CREATE POLICY ${isolationPolicy} ON ${tableName}`,
+        `  USING (${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text);`,
+      ],
+    ));
+    lines.push(...createPolicyIfMissing(
+      insertPolicy,
+      model.schemaName ?? 'public',
+      model.tableName,
+      [
+        `CREATE POLICY ${insertPolicy} ON ${tableName}`,
+        `  FOR INSERT WITH CHECK (${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text);`,
+      ],
+    ));
     lines.push(
       `GRANT SELECT, INSERT, UPDATE, DELETE ON ${tableName} TO app_user;`,
     );
@@ -153,6 +206,7 @@ export function generateSetupSql(options: SetupSqlOptions): string {
   for (const schema of schemas) {
     lines.push(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${quoteSqlIdentifier(schema)} TO app_user;`);
   }
+  lines.push('COMMIT;');
   lines.push('-- END GENERATED TENANCY SQL');
 
   return lines.join('\n');
