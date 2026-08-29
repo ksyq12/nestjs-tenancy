@@ -67,7 +67,7 @@ Measured extension overhead: **-0.003ms avg (-0.1%)**, **-0.166ms p95** compared
 
 ## Prerequisites
 
-- Node.js >= 20.19
+- Node.js 22.13 or newer within Node 22, or Node.js 24
 - NestJS 10 or 11
 - Prisma 7 (recommended) or Prisma 6
 - PostgreSQL (with RLS support). Use a patched minor release: CVE-2024-10976 is fixed in PostgreSQL 17.1, 16.5, 15.9, 14.14, 13.17, and 12.21.
@@ -78,22 +78,25 @@ Measured extension overhead: **-0.003ms avg (-0.1%)**, **-0.166ms p95** compared
 published minor release line only; `0.15.x` is the current supported line. See
 the [security policy](./SECURITY.md) for reporting and response targets.
 
-Published compatibility ranges and repository verification are related, but
+Package compatibility ranges and repository verification are related, but
 they are not the same claim:
 
-| Area | Published contract | Current repository evidence for 0.15.x |
+| Area | Unreleased contract in this source tree | Current repository evidence |
 |------|--------------------|----------------------------------------|
-| Node.js | `>=20.19.0` | Lint, unit/coverage, and build run on 20.19.0, 22, and 24. Database and infrastructure jobs run on 22; publishing runs on 24. |
-| NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | The locked primary graph uses NestJS 11.2.1. A Node 20.19 unit/build compatibility job covers NestJS 10 with Prisma 6, and the strict ecosystem fixture covers exact NestJS 10.4.20 with Prisma 6.19.3 on Node 22. |
+| Node.js | `^22.13.0 \|\| ^24.0.0` | Lint, unit/coverage, and build run on exact 22.13.0, the current Node 22 release, and the current Node 24 release. Database and infrastructure jobs run on current Node 22; publishing runs on current Node 24. |
+| NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | The locked primary graph uses NestJS 11.2.1. A current-Node-22 unit/build compatibility job covers NestJS 10 with Prisma 6, and the strict ecosystem fixture covers exact NestJS 10.4.20 with Prisma 6.19.3 on current Node 22. |
 | Prisma | Peer range `^6.0.0 \|\| ^7.0.0` | The locked primary and direct PostgreSQL lanes use Prisma 7.9.1. The PgBouncer matrix uses exact Prisma 6.19.3 and 7.9.1; the ecosystem lane uses exact Prisma 6.19.3. |
 
 The peer ranges permit all four NestJS 10/11 × Prisma 6/7 combinations, but
 the repository does not yet strict-install and independently exercise that full
 cross-product. Exact versions above describe current evidence, not new minimum
-versions. Node.js 20 remains in the 0.15.x package contract and CI for existing
-consumers even though it is [upstream EOL](https://nodejs.org/en/about/previous-releases);
-a future minor is planned to raise the floor to Node.js 22.13.0. Use maintained
-Node.js 22 or 24 releases for production today.
+versions. Already-published 0.15.x artifacts retain their Node.js `>=20.19.0`
+metadata, but Node.js 20 is [upstream EOL](https://nodejs.org/en/about/previous-releases)
+and is no longer supported by this source tree. The Node floor change is a
+breaking pre-1.0 change planned for 0.16.0; Node 20 consumers must upgrade their
+runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked
+sibling-package compatibility evidence is complete. Node 26 support is not yet
+declared and requires separate validation.
 
 The automatic tenant-isolation guarantee does not currently cover:
 

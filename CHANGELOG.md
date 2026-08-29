@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (Breaking)
+
+- Raised the supported Node.js runtime contract from `>=20.19.0` to `^22.13.0 || ^24.0.0`, removed the EOL Node.js 20 CI lane, and aligned development types with Node.js 22. This pre-1.0 breaking change is planned for 0.16.0; Node.js 20 consumers must upgrade their runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked sibling-package compatibility evidence is complete.
+
 ### Changed
 
 - Made `TenancyModule`'s validated `dbSettingKey` the canonical runtime setting inherited by the Prisma extension and `tenancyTransaction()`. Explicit identical values remain compatible, while mismatches now fail before database work starts.
@@ -13,8 +17,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 
-- Defined the latest-minor-only security support policy for the current 0.15.x line and separated declared Node.js, NestJS, and Prisma ranges from the combinations actually exercised by CI.
-- Documented that Node.js 20 remains in the current 0.15.x contract despite upstream EOL, with the planned Node.js 22.13.0 floor still pending.
+- Defined the latest-minor-only security support policy for the current 0.15.x line and separated the already-published Node.js contract, the Unreleased 0.16.0 contract, and the NestJS/Prisma combinations actually exercised by CI.
+- Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, and the 0.16.0 compatibility-evidence release hold.
 - Corrected the private vulnerability reporting path and centralized the current raw Prisma query, WebSocket, and managed-pooler guarantee boundaries.
 
 ### Current Deprecation Inventory

@@ -6,13 +6,27 @@ on:
 
 jobs:
   test:
+    name: Source gates (${{ matrix.lane }}, Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - node-version: '22.13.0'
+            lane: minimum
+            check-latest: false
+          - node-version: '22'
+            lane: current-22
+            check-latest: true
+          - node-version: '24'
+            lane: current-24
+            check-latest: true
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
+          check-latest: ${{ matrix.check-latest }}
           cache: npm
 
       - run: npm ci
@@ -38,7 +52,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -62,7 +77,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -84,7 +100,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -110,7 +127,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -132,7 +150,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: '24'
+          check-latest: true
           registry-url: https://registry.npmjs.org
 
       - run: npm ci

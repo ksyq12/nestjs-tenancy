@@ -12,14 +12,17 @@ supported line.
 | 0.15.x                | ✅                 |
 | 0.14.x and earlier    | ❌ Upgrade to 0.15.x |
 
-Package security support and upstream runtime maintenance are separate. The
-current 0.15.x package still declares Node.js >= 20.19.0 and checks Node.js
-20.19.0, 22, and 24 in CI. However, Node.js 20 is upstream EOL; production
-deployments should use a maintained Node.js 22 or 24 release. A future minor is
-planned to raise the package floor to Node.js 22.13.0, but that change has not been
-made yet. See the README's [support and compatibility](./README.md#support-and-compatibility)
-section for the declared NestJS and Prisma ranges and the narrower set of
-combinations exercised by CI.
+Package security support and upstream runtime maintenance are separate.
+Already-published 0.15.x artifacts declare Node.js >= 20.19.0, but Node.js 20
+is upstream EOL and security fixes for the package do not restore upstream
+runtime support. The Unreleased source planned for 0.16.0 declares
+`^22.13.0 || ^24.0.0`; CI and release source gates cover exact Node.js 22.13.0,
+the current Node.js 22 release, and the current Node.js 24 release. Publishing
+0.16.0 remains on hold until the tracked sibling-package compatibility evidence
+is complete. Node.js 26 support is not declared. See the README's
+[support and compatibility](./README.md#support-and-compatibility) section for
+the declared NestJS and Prisma ranges and the narrower set of combinations
+exercised by CI.
 
 ## Reporting a Vulnerability
 

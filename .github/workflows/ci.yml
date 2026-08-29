@@ -8,10 +8,20 @@ on:
 
 jobs:
   test:
+    name: Source gates (${{ matrix.lane }}, Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20.19.0, 22, 24]
+        include:
+          - node-version: '22.13.0'
+            lane: minimum
+            check-latest: false
+          - node-version: '22'
+            lane: current-22
+            check-latest: true
+          - node-version: '24'
+            lane: current-24
+            check-latest: true
 
     steps:
       - uses: actions/checkout@v6
@@ -20,6 +30,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
+          check-latest: ${{ matrix.check-latest }}
           cache: npm
 
       - run: npm ci
@@ -28,7 +39,7 @@ jobs:
       - run: npm run build
 
       - name: Upload coverage to Codecov
-        if: matrix.node-version == 22
+        if: matrix.lane == 'current-22'
         uses: codecov/codecov-action@v5
         with:
           directory: ./coverage
@@ -41,13 +52,14 @@ jobs:
         include:
           - nest: 10
             prisma: 6
-            node: 20.19.0
+            node: '22'
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -74,7 +86,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -98,7 +111,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -120,7 +134,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
@@ -146,7 +161,8 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: '22'
+          check-latest: true
           cache: npm
 
       - run: npm ci
