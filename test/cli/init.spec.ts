@@ -4,6 +4,7 @@ import * as path from 'path';
 jest.mock('prompts', () => jest.fn());
 
 import { runInit } from '../../src/cli/init';
+import { runCli } from '../../src/cli';
 
 describe('CLI init', () => {
   const tmpDir = path.join(__dirname, 'tmp-init-test');
@@ -23,6 +24,7 @@ describe('CLI init', () => {
     );
 
     const prompts = require('prompts') as jest.Mock;
+    prompts.mockClear();
     prompts.mockResolvedValue({
       extractor: 'Header (X-Tenant-Id)',
       tenantFormat: 'UUID',
@@ -86,6 +88,36 @@ describe('CLI init', () => {
     expect(sql).not.toContain('"User"');
   });
 
+  it('should safely encode escaped mapped schema and table names', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      String.raw`model LedgerEntry {
+  id Int @id
+  tenant_id String
+
+  @@schema("tenant\"ops")
+  @@map("ledger;\narchive")
+}
+`,
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    await runInit({ cwd: tmpDir });
+
+    const sql = fs.readFileSync(path.join(tmpDir, 'tenancy-setup.sql'), 'utf-8');
+    expect(sql).toContain(
+      'ALTER TABLE "tenant""ops"."ledger;\narchive" ENABLE ROW LEVEL SECURITY;',
+    );
+  });
+
   it('should generate proper imports for non-Header extractor (Subdomain)', async () => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
@@ -107,7 +139,8 @@ describe('CLI init', () => {
     expect(fs.existsSync(modulePath)).toBe(true);
     const content = fs.readFileSync(modulePath, 'utf-8');
     expect(content).toContain('SubdomainTenantExtractor');
-    expect(content).toContain('SubdomainTenantExtractor, createPrismaTenancyExtension');
+    expect(content).toContain('TenancyModule, SubdomainTenantExtractor');
+    expect(content).toContain('// import { createPrismaTenancyExtension }');
     expect(content).toContain('new SubdomainTenantExtractor()');
   });
 
@@ -131,10 +164,11 @@ describe('CLI init', () => {
     const modulePath = path.join(tmpDir, 'tenancy.module-setup.ts');
     const content = fs.readFileSync(modulePath, 'utf-8');
     expect(content).toContain('JwtClaimTenantExtractor');
-    expect(content).toContain('JwtClaimTenantExtractor, createPrismaTenancyExtension');
+    expect(content).toContain('TenancyModule, JwtClaimTenantExtractor');
+    expect(content).toContain('// import { createPrismaTenancyExtension }');
   });
 
-  it('should include createPrismaTenancyExtension import when autoInject is true', async () => {
+  it('should include a commented Prisma extension import when autoInject is true', async () => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n',
@@ -155,7 +189,8 @@ describe('CLI init', () => {
     const content = fs.readFileSync(modulePath, 'utf-8');
     expect(content).toContain('createPrismaTenancyExtension');
     expect(content).toContain('SubdomainTenantExtractor');
-    expect(content).toContain("import { TenancyModule, SubdomainTenantExtractor, createPrismaTenancyExtension } from '@nestarc/tenancy'");
+    expect(content).toContain("import { TenancyModule, SubdomainTenantExtractor } from '@nestarc/tenancy'");
+    expect(content).toContain("// import { createPrismaTenancyExtension } from '@nestarc/tenancy'");
   });
 
   it('should not overwrite without confirmation', async () => {
@@ -250,6 +285,71 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
+  it.each([
+    'current_tenant',
+    'app.tenant-key',
+    'app.tenant\nkey',
+    'app.tenant\0key',
+  ])('should reject an invalid database setting key before writing files: %p', async (dbSettingKey) => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey,
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await runInit({ cwd: tmpDir });
+
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid database setting key'));
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
+    consoleSpy.mockRestore();
+  });
+
+  it('should preserve existing outputs when a mapped identifier is invalid', async () => {
+    const longTableName = 't'.repeat(64);
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      `model User {\n  id Int @id\n  tenant_id String\n\n  @@map("${longTableName}")\n}\n`,
+    );
+    fs.writeFileSync(path.join(tmpDir, 'tenancy-setup.sql'), 'existing sql');
+    fs.writeFileSync(
+      path.join(tmpDir, 'tenancy.module-setup.ts'),
+      'existing module',
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockClear();
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    await runInit({ cwd: tmpDir });
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Table PostgreSQL identifier'),
+    );
+    expect(fs.readFileSync(path.join(tmpDir, 'tenancy-setup.sql'), 'utf-8'))
+      .toBe('existing sql');
+    expect(fs.readFileSync(path.join(tmpDir, 'tenancy.module-setup.ts'), 'utf-8'))
+      .toBe('existing module');
+    expect(prompts).toHaveBeenCalledTimes(1);
+    consoleSpy.mockRestore();
+  });
+
   it('should return early when user cancels (no extractor in response)', async () => {
     const prompts = require('prompts') as jest.Mock;
     // prompts returns an empty object (user hit Ctrl+C / cancelled)
@@ -260,6 +360,64 @@ describe('CLI init', () => {
 
     expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
+  });
+
+  it('should reject an incomplete prompt response before writing files', async () => {
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+    });
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runInit({ cwd: tmpDir });
+
+    expect(result).toBe('invalid');
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('incomplete'));
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
+    consoleSpy.mockRestore();
+  });
+
+  it('should return a non-zero CLI status for invalid init input', async () => {
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'invalid-key',
+      autoInject: false,
+      sharedModels: '',
+    });
+    const consoleErrorSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+    const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    const exitCode = await runCli(['init']);
+
+    expect(exitCode).toBe(1);
+    consoleErrorSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+  });
+
+  it('should reject unsupported prompt choices before writing files', async () => {
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Unsupported extractor',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: false,
+      sharedModels: '',
+    });
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await runInit({ cwd: tmpDir });
+
+    expect(result).toBe('invalid');
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
+    consoleSpy.mockRestore();
   });
 
   it('should pass shared models to SQL and module setup', async () => {

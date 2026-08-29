@@ -1,5 +1,13 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as ts from 'typescript';
 import { generateSetupSql } from '../../src/cli/templates/setup-sql';
 import { generateModuleSetup } from '../../src/cli/templates/module-setup';
+
+function formatDiagnostic(diagnostic: ts.Diagnostic): string {
+  return ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n');
+}
 
 describe('generateSetupSql', () => {
   const baseOptions = {
@@ -50,7 +58,7 @@ describe('generateSetupSql', () => {
     expect(sql).toContain('CREATE POLICY tenant_isolation_User ON "User"');
     expect(sql).toContain("current_setting('app.current_tenant', true)::text");
     expect(sql).toContain('CREATE POLICY tenant_insert_User ON "User"');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" (tenant_id);');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx ON "User" ("tenant_id");');
     expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "User" TO app_user;');
   });
 
@@ -62,6 +70,55 @@ describe('generateSetupSql', () => {
     };
     const sql = generateSetupSql(options);
     expect(sql).toContain("current_setting('app.tenant', true)::text");
+  });
+
+  it.each([
+    'current_tenant',
+    'app.',
+    'app.tenant-key',
+    'app.tenant\nkey',
+    'app.tenant\0key',
+  ])('should reject an invalid database setting key: %p', (dbSettingKey) => {
+    expect(() => generateSetupSql({
+      ...baseOptions,
+      dbSettingKey,
+      models: [{ modelName: 'Post', tableName: 'posts' }],
+    })).toThrow(/database setting key/i);
+  });
+
+  it('should quote mapped schema, table, and tenant column identifiers independently', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: [{
+        modelName: 'LedgerEntry',
+        schemaName: 'tenant"ops',
+        tableName: 'ledger;\narchive',
+      }],
+      tenantIdField: 'tenant"id',
+    });
+
+    expect(sql).toContain('ALTER TABLE "tenant""ops"."ledger;\narchive" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('("tenant""id")');
+    expect(sql).toContain('USING ("tenant""id" = current_setting(\'app.current_tenant\', true)::text);');
+  });
+
+  it.each([
+    ['NUL table', { modelName: 'Order', tableName: 'orders\0archive' }],
+    ['long table', { modelName: 'Order', tableName: 'o'.repeat(64) }],
+    ['NUL schema', { modelName: 'Order', tableName: 'orders', schemaName: 'ops\0archive' }],
+    ['long schema', { modelName: 'Order', tableName: 'orders', schemaName: 's'.repeat(64) }],
+  ])('should reject an invalid PostgreSQL identifier: %s', (_label, model) => {
+    expect(() => generateSetupSql({
+      ...baseOptions,
+      models: [model],
+    })).toThrow(/PostgreSQL identifier/i);
+  });
+
+  it('should reject a model name containing NUL', () => {
+    expect(() => generateSetupSql({
+      ...baseOptions,
+      models: [{ modelName: 'Order\0Archive', tableName: 'orders' }],
+    })).toThrow(/Prisma model name/i);
   });
 
   it('should use mapped tableName in policies', () => {
@@ -118,8 +175,8 @@ describe('generateSetupSql', () => {
       models: [{ modelName: 'Order', tableName: 'orders' }],
     };
     const sql = generateSetupSql(options);
-    expect(sql).toContain('org_id = current_setting');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_orders_org_id_idx ON "orders" (org_id);');
+    expect(sql).toContain('"org_id" = current_setting');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_orders_org_id_idx ON "orders" ("org_id");');
   });
 
   it('should sanitize hyphenated table names in policy identifiers', () => {
@@ -147,7 +204,7 @@ describe('generateSetupSql', () => {
       expect(sql).toContain('ALTER TABLE "auth"."users" FORCE ROW LEVEL SECURITY;');
       expect(sql).toContain('CREATE POLICY tenant_isolation_auth_users ON "auth"."users"');
       expect(sql).toContain('CREATE POLICY tenant_insert_auth_users ON "auth"."users"');
-      expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_auth_users_tenant_id_idx ON "auth"."users" (tenant_id);');
+      expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_auth_users_tenant_id_idx ON "auth"."users" ("tenant_id");');
       expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "auth"."users" TO app_user;');
     });
 
@@ -232,7 +289,8 @@ describe('generateModuleSetup', () => {
   it('should use Header extractor (default) when type is Header (X-Tenant-Id)', () => {
     const result = generateModuleSetup(baseOptions);
     expect(result).toContain("tenantExtractor: 'X-Tenant-Id',");
-    expect(result).toContain("import { TenancyModule, createPrismaTenancyExtension } from '@nestarc/tenancy';");
+    expect(result).toContain("import { TenancyModule } from '@nestarc/tenancy';");
+    expect(result).toContain("// import { createPrismaTenancyExtension } from '@nestarc/tenancy';");
   });
 
   it('should use SubdomainTenantExtractor for Subdomain type', () => {
@@ -299,7 +357,7 @@ describe('generateModuleSetup', () => {
       ...baseOptions,
       dbSettingKey: 'app.tenant',
     });
-    expect(result).toContain("dbSettingKey: 'app.tenant',");
+    expect(result).toContain('dbSettingKey: "app.tenant",');
   });
 
   it('should include extension options block when only dbSettingKey is custom', () => {
@@ -308,7 +366,7 @@ describe('generateModuleSetup', () => {
       dbSettingKey: 'app.tenant',
     });
     expect(result).toContain('createPrismaTenancyExtension(tenancyService, {');
-    expect(result).toContain("dbSettingKey: 'app.tenant',");
+    expect(result).toContain('dbSettingKey: "app.tenant",');
   });
 
   it('should always include Prisma extension block', () => {
@@ -334,7 +392,59 @@ describe('generateModuleSetup', () => {
       ...baseOptions,
       sharedModels: ['Country', 'Currency'],
     });
-    expect(result).toContain("sharedModels: ['Country', 'Currency'],");
+    expect(result).toContain('sharedModels: ["Country","Currency"],');
+  });
+
+  it('should serialize generated TypeScript strings and arrays as JSON literals', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      dbSettingKey: 'custom.tenant',
+      sharedModels: ['Ledger"Entry', 'Line\nItem', 'Path\\Value'],
+    });
+
+    expect(result).toContain(`dbSettingKey: ${JSON.stringify('custom.tenant')},`);
+    expect(result).toContain(`sharedModels: ${JSON.stringify(['Ledger"Entry', 'Line\nItem', 'Path\\Value'])},`);
+  });
+
+  it('should keep JavaScript line separators escaped inside comments', () => {
+    const lineSeparator = String.fromCodePoint(0x2028);
+    const paragraphSeparator = String.fromCodePoint(0x2029);
+    const result = generateModuleSetup({
+      ...baseOptions,
+      sharedModels: [
+        `Line${lineSeparator}Item`,
+        `Paragraph${paragraphSeparator}Item`,
+      ],
+    });
+    const sourceFile = ts.createSourceFile(
+      'tenancy.module-setup.ts',
+      result,
+      ts.ScriptTarget.ES2021,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    expect(result).toContain('\\u2028');
+    expect(result).toContain('\\u2029');
+    expect(result).not.toContain(lineSeparator);
+    expect(result).not.toContain(paragraphSeparator);
+    const parseDiagnostics = (
+      sourceFile as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] }
+    ).parseDiagnostics;
+    expect(parseDiagnostics).toHaveLength(0);
+    expect(sourceFile.statements.filter(ts.isExpressionStatement)).toHaveLength(1);
+  });
+
+  it.each([
+    'current_tenant',
+    'app.tenant-key',
+    'app.tenant\nkey',
+    'app.tenant\0key',
+  ])('should reject an invalid module database setting key: %p', (dbSettingKey) => {
+    expect(() => generateModuleSetup({
+      ...baseOptions,
+      dbSettingKey,
+    })).toThrow(/database setting key/i);
   });
 
   it('should include both autoInjectTenantId and sharedModels when both are provided', () => {
@@ -344,7 +454,7 @@ describe('generateModuleSetup', () => {
       sharedModels: ['Country'],
     });
     expect(result).toContain('autoInjectTenantId: true,');
-    expect(result).toContain("sharedModels: ['Country'],");
+    expect(result).toContain('sharedModels: ["Country"],');
   });
 
   it('should include validateTenantId when tenantFormat is Custom and customRegex is provided', () => {
@@ -400,5 +510,55 @@ describe('generateModuleSetup', () => {
       customRegex: '',
     });
     expect(result).not.toContain('validateTenantId');
+  });
+
+  it('should generate TypeScript that passes semantic typechecking', () => {
+    const source = generateModuleSetup({
+      ...baseOptions,
+      extractorType: 'Composite',
+      dbSettingKey: 'custom.tenant',
+      autoInjectTenantId: true,
+      sharedModels: ['Ledger"Entry', 'Line\nItem', 'Path\\Value'],
+      tenantFormat: 'Custom',
+      customRegex: '^tenant["\\n].+$',
+    });
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'tenancy-generated-module-'),
+    );
+    const generatedPath = path.join(tempDir, 'tenancy.module-setup.ts');
+    fs.writeFileSync(generatedPath, source, 'utf-8');
+
+    try {
+      const repositoryRoot = path.resolve(__dirname, '../..');
+      const program = ts.createProgram({
+        rootNames: [
+          generatedPath,
+          path.join(repositoryRoot, 'src/types/psl.d.ts'),
+        ],
+        options: {
+          module: ts.ModuleKind.Node16,
+          moduleResolution: ts.ModuleResolutionKind.Node16,
+          target: ts.ScriptTarget.ES2021,
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          experimentalDecorators: true,
+          emitDecoratorMetadata: true,
+          baseUrl: repositoryRoot,
+          typeRoots: [path.join(repositoryRoot, 'node_modules/@types')],
+          types: ['node'],
+          paths: {
+            '@nestarc/tenancy': ['src/index.ts'],
+          },
+          noUnusedLocals: true,
+        },
+      });
+      const diagnostics = ts.getPreEmitDiagnostics(program);
+
+      expect(diagnostics.map(formatDiagnostic)).toEqual([]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

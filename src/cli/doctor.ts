@@ -1,3 +1,9 @@
+import {
+  isValidPostgresIdentifier,
+  isValidPostgresSettingKey,
+  quoteSqlIdentifier,
+} from '../postgres-safety';
+
 export const DOCTOR_SCHEMA_VERSION = 1 as const;
 
 export const DoctorExitCode = {
@@ -866,7 +872,7 @@ async function tenantProbe(
       [options.dbSettingKey, tenantId],
     );
     const table = quoteQualifiedIdentifier(options.schema, options.table);
-    const column = quoteIdentifier(options.tenantColumn);
+    const column = quoteSqlIdentifier(options.tenantColumn);
     const result = await client.query<TenantProbeRow>(
       `SELECT
         EXISTS (SELECT 1 FROM ${table}) AS has_visible,
@@ -1156,11 +1162,7 @@ function truncateIdentifier(identifier: string, maxLength: number): string {
 }
 
 function quoteQualifiedIdentifier(schema: string, table: string): string {
-  return `${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
-}
-
-function quoteIdentifier(identifier: string): string {
-  return `"${identifier.replace(/"/g, '""')}"`;
+  return `${quoteSqlIdentifier(schema)}.${quoteSqlIdentifier(table)}`;
 }
 
 function addCheck(checks: DoctorCheck[], check: DoctorCheck): void {
@@ -1176,12 +1178,12 @@ function validateDoctorOptions(options: DoctorOptions): ValidatedDoctorOptions |
   if (!isSafeText(options.role)) return '--role must be a non-empty PostgreSQL role name without NUL bytes.';
 
   const settingKey = options.dbSettingKey ?? DEFAULT_SETTING_KEY;
-  if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$/.test(settingKey)) {
+  if (!isValidPostgresSettingKey(settingKey)) {
     return '--db-setting-key must be a dotted PostgreSQL custom setting name (for example app.current_tenant).';
   }
 
   const tenantColumn = options.tenantColumn ?? DEFAULT_TENANT_COLUMN;
-  if (!isSafeText(tenantColumn) || tenantColumn.includes('.')) {
+  if (!isValidPostgresIdentifier(tenantColumn) || tenantColumn.includes('.')) {
     return '--tenant-column must be one non-empty PostgreSQL identifier without NUL bytes.';
   }
 
@@ -1218,8 +1220,8 @@ function parseQualifiedTable(value: string): { schema: string; table: string } |
   }
   const schema = value.slice(0, dot);
   const table = value.slice(dot + 1);
-  if (!isSafeText(schema) || !isSafeText(table)) {
-    return '--table schema and table names must not contain NUL bytes.';
+  if (!isValidPostgresIdentifier(schema) || !isValidPostgresIdentifier(table)) {
+    return '--table schema and table names must be non-empty PostgreSQL identifiers without NUL bytes and at most 63 UTF-8 bytes.';
   }
   return { schema, table };
 }

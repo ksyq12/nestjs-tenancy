@@ -1,3 +1,9 @@
+import {
+  assertValidPostgresSettingKey,
+  serializeTypeScriptString,
+  serializeTypeScriptStringArray,
+} from '../../postgres-safety';
+
 export interface ModuleSetupOptions {
   extractorType: string;
   dbSettingKey: string;
@@ -8,6 +14,8 @@ export interface ModuleSetupOptions {
 }
 
 export function generateModuleSetup(options: ModuleSetupOptions): string {
+  assertValidPostgresSettingKey(options.dbSettingKey);
+
   // Determine which extractor class (if any) needs to be imported
   const extractorImportMap: Record<string, string> = {
     'Subdomain (tenant1.app.com)': 'SubdomainTenantExtractor',
@@ -39,7 +47,6 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
       namedImports.push('HeaderTenantExtractor');
     }
   }
-  namedImports.push('createPrismaTenancyExtension');
   lines.push(`import { ${namedImports.join(', ')} } from '@nestarc/tenancy';`);
   lines.push('');
 
@@ -74,18 +81,21 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
   if (options.tenantFormat === 'Custom' && options.customRegex) {
     // Use new RegExp() instead of /.../ literal to safely handle regex with '/'
     lines.push(
-      `  validateTenantId: (id) => new RegExp(${JSON.stringify(options.customRegex)}).test(id),`,
+      `  validateTenantId: (id) => new RegExp(${serializeTypeScriptString(options.customRegex)}).test(id),`,
     );
   }
 
   if (options.dbSettingKey !== 'app.current_tenant') {
-    lines.push(`  dbSettingKey: '${options.dbSettingKey}',`);
+    lines.push(
+      `  dbSettingKey: ${serializeTypeScriptString(options.dbSettingKey)},`,
+    );
   }
 
   lines.push('})');
 
   lines.push('');
   lines.push('// Prisma extension — required for RLS to work:');
+  lines.push("// import { createPrismaTenancyExtension } from '@nestarc/tenancy';");
   lines.push('// Prisma 7: create basePrisma with the adapter required by your database.');
   lines.push('// const prisma = basePrisma.$extends(');
   if (hasExtensionOptions) {
@@ -95,11 +105,13 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
     }
     if (options.sharedModels.length > 0) {
       lines.push(
-        `//     sharedModels: [${options.sharedModels.map((m) => `'${m}'`).join(', ')}],`,
+        `//     sharedModels: ${serializeTypeScriptStringArray(options.sharedModels)},`,
       );
     }
     if (options.dbSettingKey !== 'app.current_tenant') {
-      lines.push(`//     dbSettingKey: '${options.dbSettingKey}',`);
+      lines.push(
+        `//     dbSettingKey: ${serializeTypeScriptString(options.dbSettingKey)},`,
+      );
     }
     lines.push('//   })');
   } else {

@@ -28,8 +28,8 @@ export async function runCli(
   if (command === 'init') {
     const dryRun = flags.has('--dry-run');
     try {
-      await require('./init').runInit({ dryRun });
-      return 0;
+      const result = await require('./init').runInit({ dryRun });
+      return result === 'invalid' ? 1 : 0;
     } catch (error) {
       io.error(error instanceof Error ? error.message : String(error));
       return 1;

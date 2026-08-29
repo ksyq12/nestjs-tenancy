@@ -3,10 +3,30 @@ import * as path from 'path';
 import { parseModels } from './prisma-schema-parser';
 import { generateSetupSql } from './templates/setup-sql';
 import { generateModuleSetup } from './templates/module-setup';
+import { isValidPostgresSettingKey } from '../postgres-safety';
 
 interface InitOptions {
   cwd?: string;
   dryRun?: boolean;
+}
+
+export type InitResult = 'completed' | 'cancelled' | 'invalid';
+
+const EXTRACTOR_TYPES = [
+  'Header (X-Tenant-Id)',
+  'Subdomain (tenant1.app.com)',
+  'JWT Claim',
+  'Path Parameter',
+  'Composite',
+] as const;
+
+interface InitResponse {
+  extractor: (typeof EXTRACTOR_TYPES)[number];
+  tenantFormat: 'UUID' | 'Custom';
+  customRegex?: string;
+  dbSettingKey: string;
+  autoInject: boolean;
+  sharedModels: string;
 }
 
 // prompts package is dynamically required and returns mixed types per question
@@ -15,10 +35,9 @@ interface InitOptions {
 // at this external boundary.
 type PromptsFn = (...args: any[]) => Promise<any>;
 
-export async function runInit(options?: InitOptions): Promise<void> {
+export async function runInit(options?: InitOptions): Promise<InitResult> {
   let prompts: PromptsFn;
   try {
-     
     prompts = require('prompts');
   } catch {
     console.error(
@@ -94,36 +113,61 @@ export async function runInit(options?: InitOptions): Promise<void> {
     },
   ]);
 
-  if (!response.extractor) return;
+  if (
+    typeof response !== 'object' ||
+    response === null ||
+    !response.extractor
+  ) {
+    return 'cancelled';
+  }
+
+  if (!isCompleteInitResponse(response)) {
+    console.error('Cannot generate tenancy files: init responses are incomplete or invalid.');
+    return 'invalid';
+  }
 
   if (response.tenantFormat === 'Custom' && response.customRegex) {
     try {
       new RegExp(response.customRegex);
     } catch (err) {
       console.error(`Invalid regex: ${(err as Error).message}`);
-      return;
+      return 'invalid';
     }
+  }
+
+  if (!isValidPostgresSettingKey(response.dbSettingKey)) {
+    console.error(
+      'Invalid database setting key: expected a dotted PostgreSQL custom setting name (for example app.current_tenant).',
+    );
+    return 'invalid';
   }
 
   const sharedModels = response.sharedModels
     ? response.sharedModels.split(',').map((s: string) => s.trim()).filter(Boolean)
     : [];
 
-  const sql = generateSetupSql({
-    models,
-    dbSettingKey: response.dbSettingKey,
-    sharedModels,
-    tenantIdField: 'tenant_id',
-  });
+  let sql: string;
+  let moduleSetup: string;
+  try {
+    sql = generateSetupSql({
+      models,
+      dbSettingKey: response.dbSettingKey,
+      sharedModels,
+      tenantIdField: 'tenant_id',
+    });
 
-  const moduleSetup = generateModuleSetup({
-    extractorType: response.extractor,
-    dbSettingKey: response.dbSettingKey,
-    autoInjectTenantId: response.autoInject,
-    sharedModels,
-    tenantFormat: response.tenantFormat,
-    customRegex: response.customRegex,
-  });
+    moduleSetup = generateModuleSetup({
+      extractorType: response.extractor,
+      dbSettingKey: response.dbSettingKey,
+      autoInjectTenantId: response.autoInject,
+      sharedModels,
+      tenantFormat: response.tenantFormat,
+      customRegex: response.customRegex,
+    });
+  } catch (error) {
+    console.error(`Cannot generate tenancy files: ${(error as Error).message}`);
+    return 'invalid';
+  }
 
   if (options?.dryRun) {
     console.log('\n--- tenancy-setup.sql ---\n');
@@ -131,7 +175,7 @@ export async function runInit(options?: InitOptions): Promise<void> {
     console.log('\n--- tenancy.module-setup.ts ---\n');
     console.log(moduleSetup);
     console.log('\n(dry run — no files written)');
-    return;
+    return 'completed';
   }
 
   await writeFileWithConfirm(prompts, path.join(cwd, 'tenancy-setup.sql'), sql);
@@ -142,6 +186,28 @@ export async function runInit(options?: InitOptions): Promise<void> {
   console.log('2. Run: npx prisma migrate dev');
   console.log('3. Run tenancy-setup.sql against your database');
   console.log('4. Copy the module setup into your AppModule');
+  return 'completed';
+}
+
+function isCompleteInitResponse(value: unknown): value is InitResponse {
+  if (typeof value !== 'object' || value === null) return false;
+
+  const response = value as Record<string, unknown>;
+  const extractorIsSupported = EXTRACTOR_TYPES.some(
+    (extractor) => extractor === response.extractor,
+  );
+  const tenantFormatIsSupported =
+    response.tenantFormat === 'UUID' || response.tenantFormat === 'Custom';
+  const customRegexIsValid = response.tenantFormat === 'Custom'
+    ? typeof response.customRegex === 'string' && response.customRegex.length > 0
+    : response.customRegex === undefined || typeof response.customRegex === 'string';
+
+  return extractorIsSupported &&
+    tenantFormatIsSupported &&
+    customRegexIsValid &&
+    typeof response.dbSettingKey === 'string' &&
+    typeof response.autoInject === 'boolean' &&
+    typeof response.sharedModels === 'string';
 }
 
 async function writeFileWithConfirm(prompts: PromptsFn, filePath: string, content: string): Promise<void> {
