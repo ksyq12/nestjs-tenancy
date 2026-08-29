@@ -4,181 +4,18 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
-    name: Source gates (${{ matrix.lane }}, Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - node-version: '22.13.0'
-            lane: minimum
-            check-latest: false
-          - node-version: '22'
-            lane: current-22
-            check-latest: true
-          - node-version: '24'
-            lane: current-24
-            check-latest: true
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ matrix.node-version }}
-          check-latest: ${{ matrix.check-latest }}
-          cache: npm
-
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run test:cov
-      - run: npm run build
-
-  compat:
-    name: Packed consumer (${{ matrix.lane }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        lane:
-          - nest10-prisma6
-          - nest10-prisma7
-          - nest11-prisma6
-          - nest11-prisma7
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npm run test:compat -- --lane ${{ matrix.lane }}
-
-  package-smoke:
-    name: Actual tarball package smoke
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npm run test:package
-
-  e2e:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: tenancy
-          POSTGRES_PASSWORD: tenancy
-          POSTGRES_DB: tenancy_test
-        ports:
-          - 5433:5432
-        options: --health-cmd "pg_isready -U tenancy" --health-interval 2s --health-timeout 5s --health-retries 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npx prisma generate --schema=test/e2e/schema.prisma
-        env:
-          DATABASE_URL: postgresql://tenancy:tenancy@localhost:5433/tenancy_test
-      - run: npx jest --config test/e2e/jest.e2e.config.ts --runInBand
-        env:
-          DATABASE_URL: postgresql://tenancy:tenancy@localhost:5433/tenancy_test
-          APP_DATABASE_URL: postgresql://app_user:app_user@localhost:5433/tenancy_test
-
-  pgbouncer-e2e:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        prisma: ['6.19.3', '7.9.1']
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - name: Install Prisma ${{ matrix.prisma }} E2E runtime
-        run: npm install prisma@${{ matrix.prisma }} @prisma/client@${{ matrix.prisma }} @prisma/adapter-pg@${{ matrix.prisma }} --no-save
-      - run: npm run test:e2e:pgbouncer
-
-  redis-e2e:
-    runs-on: ubuntu-latest
-    services:
-      redis:
-        image: redis:7.4.10-alpine3.21@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
-        ports:
-          - 6380:6379
-        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npx jest --config test/e2e/redis/jest.redis.config.ts --runInBand
-        env:
-          REDIS_URL: redis://127.0.0.1:6380
-
-  ecosystem-e2e:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: tenancy
-          POSTGRES_PASSWORD: tenancy
-          POSTGRES_DB: tenancy_test
-        ports:
-          - 5433:5432
-        options: --health-cmd "pg_isready -U tenancy" --health-interval 2s --health-timeout 5s --health-retries 10
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npm run test:e2e:ecosystem
-        env:
-          ECOSYSTEM_SKIP_DOCKER: '1'
-          DATABASE_URL: postgresql://tenancy:tenancy@127.0.0.1:5433/tenancy_test
-          APP_DATABASE_URL: postgresql://ecosystem_app:ecosystem_app@127.0.0.1:5433/tenancy_test
+  validation:
+    name: Validation gates
+    uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: [test, compat, package-smoke, e2e, pgbouncer-e2e, redis-e2e, ecosystem-e2e]
+    needs: validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
