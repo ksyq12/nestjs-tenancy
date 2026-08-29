@@ -68,7 +68,13 @@ const JOB_TIMEOUTS = {
 } as const;
 
 const GATE_RUN_COMMANDS = {
-  test: ['npm ci', 'npm run lint', 'npm run test:cov', 'npm run build'],
+  test: [
+    'npm ci',
+    'npm run typecheck',
+    'npm run lint',
+    'npm run test:cov',
+    'npm run build',
+  ],
   compat: ['npm ci', 'npm run test:compat -- --lane ${{ matrix.lane }}'],
   'package-smoke': ['npm ci', 'npm run test:package'],
   e2e: [

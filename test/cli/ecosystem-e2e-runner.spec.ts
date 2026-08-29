@@ -4,6 +4,7 @@ const {
   DEFAULT_APP_DATABASE_URL,
   DEFAULT_DATABASE_URL,
   FIXTURE_INSTALL_ARGS,
+  FIXTURE_VALIDATION_STEPS,
   applyDefaultEnv,
   applyPackageSpecs,
   discoverLocalPackageSources,
@@ -33,6 +34,13 @@ describe('ecosystem E2E runner', () => {
     ]);
     expect(FIXTURE_INSTALL_ARGS).not.toContain('--legacy-peer-deps');
     expect(FIXTURE_INSTALL_ARGS).not.toContain('--force');
+  });
+
+  it('runs semantic typechecking before the ecosystem fixture tests', () => {
+    expect(FIXTURE_VALIDATION_STEPS).toEqual([
+      { command: 'npm', args: ['run', 'typecheck'] },
+      { command: 'npx', args: ['jest', '--runInBand'] },
+    ]);
   });
 
   it('replaces only declared fixture dependencies with absolute tarballs', () => {

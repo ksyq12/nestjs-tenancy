@@ -523,7 +523,9 @@ describe('CLI init', () => {
         throw new Error('Cannot find module prompts');
       });
 
-      const { runInit: runInitFresh } = await import('../../src/cli/init');
+      const { runInit: runInitFresh } = require('../../src/cli/init') as {
+        runInit: typeof runInit;
+      };
 
       await expect(runInitFresh({ cwd: tmpDir })).rejects.toThrow('process.exit called');
       expect(mockError).toHaveBeenCalledWith(

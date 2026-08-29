@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": [
+    "node_modules",
+
+    // Build output is checked from source by tsconfig.build.json. Excluding it
+    // prevents stale declarations from being mistaken for source coverage.
+    "dist",
+
+    // Prisma creates these clients for version-specific database lanes. Their
+    // own E2E runners generate and validate them before use.
+    "test/e2e/generated/**",
+    "test/e2e/generated-v6-native/**",
+
+    // These are isolated packed-package consumers with independent dependency
+    // graphs and tsconfig files. Their dedicated gates validate them after install.
+    "test/compat/fixture/**",
+    "test/ecosystem/fixture/**",
+    "test/package-consumer/fixture/**"
+  ]
+}

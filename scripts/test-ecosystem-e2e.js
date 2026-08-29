@@ -25,6 +25,10 @@ const FIXTURE_INSTALL_ARGS = [
   '--no-audit',
   '--no-fund',
 ];
+const FIXTURE_VALIDATION_STEPS = [
+  { command: 'npm', args: ['run', 'typecheck'] },
+  { command: 'npx', args: ['jest', '--runInBand'] },
+];
 
 function applyDefaultEnv(env) {
   if (env.DATABASE_URL === undefined) env.DATABASE_URL = DEFAULT_DATABASE_URL;
@@ -133,10 +137,12 @@ function main() {
       cwd: fixtureDirectory,
       env: process.env,
     });
-    run('npx', ['jest', '--runInBand'], {
-      cwd: fixtureDirectory,
-      env: process.env,
-    });
+    for (const { command, args } of FIXTURE_VALIDATION_STEPS) {
+      run(command, args, {
+        cwd: fixtureDirectory,
+        env: process.env,
+      });
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     exitCode = error.status || 1;
@@ -160,6 +166,7 @@ module.exports = {
   DEFAULT_APP_DATABASE_URL,
   DEFAULT_DATABASE_URL,
   FIXTURE_INSTALL_ARGS,
+  FIXTURE_VALIDATION_STEPS,
   LOCAL_PACKAGE_DIRECTORIES,
   applyDefaultEnv,
   applyPackageSpecs,

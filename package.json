@@ -40,6 +40,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "postbuild": "node scripts/ensure-cli-shebang.js",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
@@ -50,7 +51,7 @@
     "test:e2e:redis": "node scripts/test-redis-e2e.js",
     "test:e2e:pgbouncer": "node scripts/test-pgbouncer-e2e.js",
     "bench": "npx ts-node benchmarks/rls-overhead.ts",
-    "lint": "tsc --noEmit && eslint src/ test/",
+    "lint": "eslint src/ test/",
     "prepack": "npm run build"
   },
   "keywords": [
