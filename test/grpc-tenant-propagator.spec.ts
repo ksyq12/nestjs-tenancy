@@ -66,10 +66,10 @@ describe('GrpcTenantPropagator', () => {
       });
     });
 
-    it('should return metadata unchanged inside withoutTenant()', async () => {
+    it('should return metadata unchanged inside withoutTenant()', () => {
       const propagator = new GrpcTenantPropagator(context);
       const metadata = createMockMetadata();
-      await context.runWithoutTenant(() => {
+      context.runWithoutTenant(() => {
         propagator.inject(metadata);
         expect(metadata.store.size).toBe(0);
       });

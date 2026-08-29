@@ -72,15 +72,9 @@ describe('Prisma Extension + RLS Integration', () => {
   });
 
   it('should return only tenant 1 rows through Prisma extension', async () => {
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(await prisma.user.findMany());
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
+    const rows = await context.run(TENANT_1, async () =>
+      prisma.user.findMany(),
+    );
 
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.tenant_id === TENANT_1)).toBe(true);
@@ -88,15 +82,9 @@ describe('Prisma Extension + RLS Integration', () => {
   });
 
   it('should return only tenant 2 rows through Prisma extension', async () => {
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_2, async () => {
-        try {
-          resolve(await prisma.user.findMany());
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
+    const rows = await context.run(TENANT_2, async () =>
+      prisma.user.findMany(),
+    );
 
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
@@ -120,24 +108,8 @@ describe('Prisma Extension + RLS Integration', () => {
 
   it('should isolate tenants in concurrent requests', async () => {
     const [rows1, rows2] = await Promise.all([
-      new Promise<any[]>((resolve, reject) => {
-        context.run(TENANT_1, async () => {
-          try {
-            resolve(await prisma.user.findMany());
-          } catch (e) {
-            reject(e);
-          }
-        });
-      }),
-      new Promise<any[]>((resolve, reject) => {
-        context.run(TENANT_2, async () => {
-          try {
-            resolve(await prisma.user.findMany());
-          } catch (e) {
-            reject(e);
-          }
-        });
-      }),
+      context.run(TENANT_1, async () => prisma.user.findMany()),
+      context.run(TENANT_2, async () => prisma.user.findMany()),
     ]);
 
     expect(rows1.every((r: any) => r.tenant_id === TENANT_1)).toBe(true);
@@ -281,34 +253,20 @@ describe('Prisma Extension v0.2.0 Features', () => {
   });
 
   it('should auto-inject tenant_id on create', async () => {
-    const user = await new Promise<any>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(
-            await prisma.user.create({
-              data: { name: 'AutoInject', email: 'auto@test.com' },
-            }),
-          );
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
+    const user = await context.run(TENANT_1, async () =>
+      prisma.user.create({
+        data: { name: 'AutoInject', email: 'auto@test.com' },
+      }),
+    );
 
     expect(user.tenant_id).toBe(TENANT_1);
     expect(user.name).toBe('AutoInject');
   });
 
   it('should read shared table (Country) regardless of tenant context', async () => {
-    const countries = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(await prisma.country.findMany());
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
+    const countries = await context.run(TENANT_1, async () =>
+      prisma.country.findMany(),
+    );
 
     expect(countries).toHaveLength(2);
     expect(countries.map((c: any) => c.code).sort()).toEqual(['KR', 'US']);
@@ -340,45 +298,33 @@ describe('tenancyTransaction() E2E', () => {
   });
 
   it('should apply RLS inside interactive transaction', async () => {
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(await tenancyTransaction(basePrisma, service, async (tx) => {
-            return tx.user.findMany();
-          }));
-        } catch (e) { reject(e); }
-      });
-    });
+    const rows = await context.run(TENANT_1, async () =>
+      tenancyTransaction(basePrisma, service, async (tx) => {
+        return tx.user.findMany();
+      }),
+    );
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.tenant_id === TENANT_1)).toBe(true);
   });
 
   it('should support writes in interactive transaction', async () => {
-    const user = await new Promise<any>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(await tenancyTransaction(basePrisma, service, async (tx) => {
-            return tx.user.create({
-              data: { name: 'TxTest', email: 'tx@test.com', tenant_id: TENANT_1 },
-            });
-          }));
-        } catch (e) { reject(e); }
-      });
-    });
+    const user = await context.run(TENANT_1, async () =>
+      tenancyTransaction(basePrisma, service, async (tx) => {
+        return tx.user.create({
+          data: { name: 'TxTest', email: 'tx@test.com', tenant_id: TENANT_1 },
+        });
+      }),
+    );
     expect(user.name).toBe('TxTest');
     expect(user.tenant_id).toBe(TENANT_1);
   });
 
   it('should isolate tenants in interactive transaction', async () => {
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_2, async () => {
-        try {
-          resolve(await tenancyTransaction(basePrisma, service, async (tx) => {
-            return tx.user.findMany();
-          }));
-        } catch (e) { reject(e); }
-      });
-    });
+    const rows = await context.run(TENANT_2, async () =>
+      tenancyTransaction(basePrisma, service, async (tx) => {
+        return tx.user.findMany();
+      }),
+    );
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
   });
@@ -410,47 +356,35 @@ describe('interactiveTransactionSupport E2E', () => {
   });
 
   it('should apply RLS inside interactive transaction with ITX support', async () => {
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(await prisma.$transaction(async (tx: any) => {
-            return tx.user.findMany();
-          }));
-        } catch (e) { reject(e); }
-      });
-    });
+    const rows = await context.run(TENANT_1, async () =>
+      prisma.$transaction(async (tx: any) => {
+        return tx.user.findMany();
+      }),
+    );
 
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.tenant_id === TENANT_1)).toBe(true);
   });
 
   it('should isolate tenants in interactive transaction with ITX support', async () => {
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      context.run(TENANT_2, async () => {
-        try {
-          resolve(await prisma.$transaction(async (tx: any) => {
-            return tx.user.findMany();
-          }));
-        } catch (e) { reject(e); }
-      });
-    });
+    const rows = await context.run(TENANT_2, async () =>
+      prisma.$transaction(async (tx: any) => {
+        return tx.user.findMany();
+      }),
+    );
 
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.tenant_id === TENANT_2)).toBe(true);
   });
 
   it('should support writes in interactive transaction with ITX support', async () => {
-    const user = await new Promise<any>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          resolve(await prisma.$transaction(async (tx: any) => {
-            return tx.user.create({
-              data: { name: 'ItxTest', email: 'itx@test.com', tenant_id: TENANT_1 },
-            });
-          }));
-        } catch (e) { reject(e); }
-      });
-    });
+    const user = await context.run(TENANT_1, async () =>
+      prisma.$transaction(async (tx: any) => {
+        return tx.user.create({
+          data: { name: 'ItxTest', email: 'itx@test.com', tenant_id: TENANT_1 },
+        });
+      }),
+    );
 
     expect(user.name).toBe('ItxTest');
     expect(user.tenant_id).toBe(TENANT_1);

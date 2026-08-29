@@ -114,34 +114,26 @@ describe('createPrismaTenancyExtension', () => {
     // $transaction receives array of promises and returns their results
     mockTransaction.mockResolvedValue([1, [{ id: 1, tenant_id: 'tenant-1' }]]);
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
-        try {
-          const result = await handler({
-            model: 'TestModel',
-            operation: 'findMany',
-            args: { where: { id: 1 } },
-            query: mockQuery,
-          });
-
-          expect(mockTransaction).toHaveBeenCalledTimes(1);
-
-          // Verify $transaction was called with an array of two elements
-          const txArgs = mockTransaction.mock.calls[0][0];
-          expect(Array.isArray(txArgs)).toBe(true);
-          expect(txArgs).toHaveLength(2);
-
-          // Second element should be the query result promise
-          expect(mockQuery).toHaveBeenCalledWith({ where: { id: 1 } });
-
-          // Result should be the second element of the transaction result
-          expect(result).toEqual([{ id: 1, tenant_id: 'tenant-1' }]);
-
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
+    await context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
+      const result = await handler({
+        model: 'TestModel',
+        operation: 'findMany',
+        args: { where: { id: 1 } },
+        query: mockQuery,
       });
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+
+      // Verify $transaction was called with an array of two elements
+      const txArgs = mockTransaction.mock.calls[0][0];
+      expect(Array.isArray(txArgs)).toBe(true);
+      expect(txArgs).toHaveLength(2);
+
+      // Second element should be the query result promise
+      expect(mockQuery).toHaveBeenCalledWith({ where: { id: 1 } });
+
+      // Result should be the second element of the transaction result
+      expect(result).toEqual([{ id: 1, tenant_id: 'tenant-1' }]);
     });
   });
 
@@ -161,27 +153,21 @@ describe('createPrismaTenancyExtension', () => {
       return results;
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
-        try {
-          await handler({
-            model: 'TestModel',
-            operation: 'findMany',
-            args: {},
-            query: jest.fn().mockResolvedValue([]),
-          });
-
-          // $executeRaw is called as tagged template: $executeRaw`SELECT set_config(${key}, ${id}, TRUE)`
-          // Tagged templates pass [strings[], ...values]
-          expect(capturedSetConfigArgs.length).toBeGreaterThanOrEqual(1);
-          const [strings, ...values] = capturedSetConfigArgs[0];
-          expect(strings.join('')).toContain('set_config');
-          expect(values).toContain('app.current_tenant');
-          expect(values).toContain('550e8400-e29b-41d4-a716-446655440000');
-
-          resolve();
-        } catch (e) { reject(e); }
+    await context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
+      await handler({
+        model: 'TestModel',
+        operation: 'findMany',
+        args: {},
+        query: jest.fn().mockResolvedValue([]),
       });
+
+      // $executeRaw is called as tagged template: $executeRaw`SELECT set_config(${key}, ${id}, TRUE)`
+      // Tagged templates pass [strings[], ...values]
+      expect(capturedSetConfigArgs.length).toBeGreaterThanOrEqual(1);
+      const [strings, ...values] = capturedSetConfigArgs[0];
+      expect(strings.join('')).toContain('set_config');
+      expect(values).toContain('app.current_tenant');
+      expect(values).toContain('550e8400-e29b-41d4-a716-446655440000');
     });
   });
 
@@ -308,22 +294,15 @@ describe('createPrismaTenancyExtension', () => {
     const expectedData = [{ id: 1 }, { id: 2 }, { id: 3 }];
     mockTransaction.mockResolvedValue([1, expectedData]);
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
-        try {
-          const result = await handler({
-            model: 'TestModel',
-            operation: 'findMany',
-            args: {},
-            query: jest.fn().mockReturnValue(Promise.resolve(expectedData)),
-          });
-
-          expect(result).toEqual(expectedData);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
+    await context.run('550e8400-e29b-41d4-a716-446655440000', async () => {
+      const result = await handler({
+        model: 'TestModel',
+        operation: 'findMany',
+        args: {},
+        query: jest.fn().mockReturnValue(Promise.resolve(expectedData)),
       });
+
+      expect(result).toEqual(expectedData);
     });
   });
 
@@ -338,25 +317,18 @@ describe('createPrismaTenancyExtension', () => {
 
       const mockQuery = jest.fn().mockResolvedValue([{ code: 'US' }]);
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            const result = await handler({
-              model: 'Country',
-              operation: 'findMany',
-              args: {},
-              query: mockQuery,
-            });
-
-            expect(mockQuery).toHaveBeenCalledWith({});
-            expect(mockTransaction).not.toHaveBeenCalled();
-            expect(mockExecuteRaw).not.toHaveBeenCalled();
-            expect(result).toEqual([{ code: 'US' }]);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+      await context.run('tenant-id', async () => {
+        const result = await handler({
+          model: 'Country',
+          operation: 'findMany',
+          args: {},
+          query: mockQuery,
         });
+
+        expect(mockQuery).toHaveBeenCalledWith({});
+        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockExecuteRaw).not.toHaveBeenCalled();
+        expect(result).toEqual([{ code: 'US' }]);
       });
     });
 
@@ -370,22 +342,15 @@ describe('createPrismaTenancyExtension', () => {
 
       mockTransaction.mockResolvedValue([1, [{ id: 1 }]]);
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'findMany',
-              args: {},
-              query: jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }])),
-            });
-
-            expect(mockTransaction).toHaveBeenCalledTimes(1);
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'findMany',
+          args: {},
+          query: jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }])),
         });
+
+        expect(mockTransaction).toHaveBeenCalledTimes(1);
       });
     });
   });
@@ -400,23 +365,16 @@ describe('createPrismaTenancyExtension', () => {
         Promise.resolve({ id: 1, tenant_id: 'tenant-id' }),
       );
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'create',
-              args: { data: { name: 'Test Order' } },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'create',
+          args: { data: { name: 'Test Order' } },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              data: { name: 'Test Order', tenant_id: 'tenant-id' },
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          data: { name: 'Test Order', tenant_id: 'tenant-id' },
         });
       });
     });
@@ -428,26 +386,19 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ count: 2 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'createMany',
-              args: { data: [{ name: 'A' }, { name: 'B' }] },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'createMany',
+          args: { data: [{ name: 'A' }, { name: 'B' }] },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              data: [
-                { name: 'A', tenant_id: 'tenant-id' },
-                { name: 'B', tenant_id: 'tenant-id' },
-              ],
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          data: [
+            { name: 'A', tenant_id: 'tenant-id' },
+            { name: 'B', tenant_id: 'tenant-id' },
+          ],
         });
       });
     });
@@ -459,22 +410,15 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ count: 1 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'createMany',
-              args: { data: { name: 'A' } }, // single object, not array
-              query: mockQuery,
-            });
-
-            expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'A', tenant_id: 'tenant-id' } });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'createMany',
+          args: { data: { name: 'A' } }, // single object, not array
+          query: mockQuery,
         });
+
+        expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'A', tenant_id: 'tenant-id' } });
       });
     });
 
@@ -487,26 +431,19 @@ describe('createPrismaTenancyExtension', () => {
         Promise.resolve([{ id: 1 }, { id: 2 }]),
       );
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'createManyAndReturn',
-              args: { data: [{ name: 'A' }, { name: 'B' }] },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'createManyAndReturn',
+          args: { data: [{ name: 'A' }, { name: 'B' }] },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              data: [
-                { name: 'A', tenant_id: 'tenant-id' },
-                { name: 'B', tenant_id: 'tenant-id' },
-              ],
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          data: [
+            { name: 'A', tenant_id: 'tenant-id' },
+            { name: 'B', tenant_id: 'tenant-id' },
+          ],
         });
       });
     });
@@ -518,29 +455,22 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'upsert',
-              args: {
-                where: { id: 1 },
-                create: { name: 'New Order' },
-                update: { name: 'Updated Order' },
-              },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'upsert',
+          args: {
+            where: { id: 1 },
+            create: { name: 'New Order' },
+            update: { name: 'Updated Order' },
+          },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              where: { id: 1 },
-              create: { name: 'New Order', tenant_id: 'tenant-id' },
-              update: { name: 'Updated Order' },
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          where: { id: 1 },
+          create: { name: 'New Order', tenant_id: 'tenant-id' },
+          update: { name: 'Updated Order' },
         });
       });
     });
@@ -552,29 +482,22 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'upsert',
-              args: {
-                where: { id: 1 },
-                create: { name: 'New Order', tenant_id: 'attacker-tenant' },
-                update: { name: 'Updated Order', tenant_id: 'attacker-tenant' },
-              },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'upsert',
+          args: {
+            where: { id: 1 },
+            create: { name: 'New Order', tenant_id: 'attacker-tenant' },
+            update: { name: 'Updated Order', tenant_id: 'attacker-tenant' },
+          },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              where: { id: 1 },
-              create: { name: 'New Order', tenant_id: 'tenant-id' },
-              update: { name: 'Updated Order' },
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          where: { id: 1 },
+          create: { name: 'New Order', tenant_id: 'tenant-id' },
+          update: { name: 'Updated Order' },
         });
       });
     });
@@ -586,24 +509,17 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'update',
-              args: { where: { id: 1 }, data: { name: 'Updated' } },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'update',
+          args: { where: { id: 1 }, data: { name: 'Updated' } },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              where: { id: 1 },
-              data: { name: 'Updated' },
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: { name: 'Updated' },
         });
       });
     });
@@ -615,23 +531,16 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma, { tenantIdField: 'org_id' });
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'create',
-              args: { data: { name: 'Test' } },
-              query: mockQuery,
-            });
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'create',
+          args: { data: { name: 'Test' } },
+          query: mockQuery,
+        });
 
-            expect(mockQuery).toHaveBeenCalledWith({
-              data: { name: 'Test', org_id: 'tenant-id' },
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+        expect(mockQuery).toHaveBeenCalledWith({
+          data: { name: 'Test', org_id: 'tenant-id' },
         });
       });
     });
@@ -643,24 +552,17 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandlerWithAutoInject(mockPrisma, { sharedModels: ['Country'] });
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve([{ code: 'US' }]));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Country',
-              operation: 'create',
-              args: { data: { code: 'US' } },
-              query: mockQuery,
-            });
-
-            // Should pass through without injecting tenant_id
-            expect(mockQuery).toHaveBeenCalledWith({ data: { code: 'US' } });
-            expect(mockTransaction).not.toHaveBeenCalled();
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Country',
+          operation: 'create',
+          args: { data: { code: 'US' } },
+          query: mockQuery,
         });
+
+        // Should pass through without injecting tenant_id
+        expect(mockQuery).toHaveBeenCalledWith({ data: { code: 'US' } });
+        expect(mockTransaction).not.toHaveBeenCalled();
       });
     });
 
@@ -672,23 +574,16 @@ describe('createPrismaTenancyExtension', () => {
       const handler = getHandler(mockPrisma);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve({ id: 1 }));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'create',
-              args: { data: { name: 'Test' } },
-              query: mockQuery,
-            });
-
-            // args should NOT have tenant_id injected
-            expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'Test' } });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'create',
+          args: { data: { name: 'Test' } },
+          query: mockQuery,
         });
+
+        // args should NOT have tenant_id injected
+        expect(mockQuery).toHaveBeenCalledWith({ data: { name: 'Test' } });
       });
     });
   });
@@ -821,19 +716,14 @@ describe('createPrismaTenancyExtension', () => {
       mockTransaction.mockResolvedValue([1, [{ id: 1 }]]);
       const handler = getHandlerWithFailClosed(mockPrisma);
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'Order',
-              operation: 'findMany',
-              args: {},
-              query: jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }])),
-            });
-            expect(mockTransaction).toHaveBeenCalled();
-            resolve();
-          } catch (e) { reject(e); }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'Order',
+          operation: 'findMany',
+          args: {},
+          query: jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }])),
         });
+        expect(mockTransaction).toHaveBeenCalled();
       });
     });
 
@@ -879,27 +769,22 @@ describe('createPrismaTenancyExtension', () => {
 
       const mockQuery = jest.fn().mockResolvedValue([{ id: 1 }]);
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'User',
-              operation: 'findMany',
-              args: {},
-              query: mockQuery,
-              __internalParams: {
-                transaction: { kind: 'itx', id: 'tx-123' },
-              },
-            });
-
-            // Should use itx client, NOT batch transaction
-            expect((mockPrisma as any)._createItxClient).toHaveBeenCalled();
-            expect(mockItxExecuteRaw).toHaveBeenCalled();
-            expect(mockTransaction).not.toHaveBeenCalled();
-            expect(mockQuery).toHaveBeenCalled();
-            resolve();
-          } catch (e) { reject(e); }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'User',
+          operation: 'findMany',
+          args: {},
+          query: mockQuery,
+          __internalParams: {
+            transaction: { kind: 'itx', id: 'tx-123' },
+          },
         });
+
+        // Should use itx client, NOT batch transaction
+        expect((mockPrisma as any)._createItxClient).toHaveBeenCalled();
+        expect(mockItxExecuteRaw).toHaveBeenCalled();
+        expect(mockTransaction).not.toHaveBeenCalled();
+        expect(mockQuery).toHaveBeenCalled();
       });
     });
 
@@ -910,20 +795,15 @@ describe('createPrismaTenancyExtension', () => {
       mockTransaction.mockResolvedValue([1, [{ id: 1 }]]);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }]));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'User',
-              operation: 'findMany',
-              args: {},
-              query: mockQuery,
-            });
-
-            expect(mockTransaction).toHaveBeenCalled();
-            resolve();
-          } catch (e) { reject(e); }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'User',
+          operation: 'findMany',
+          args: {},
+          query: mockQuery,
         });
+
+        expect(mockTransaction).toHaveBeenCalled();
       });
     });
 
@@ -948,25 +828,20 @@ describe('createPrismaTenancyExtension', () => {
       mockTransaction.mockResolvedValue([1, [{ id: 1 }]]);
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve([{ id: 1 }]));
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await handler({
-              model: 'User',
-              operation: 'findMany',
-              args: {},
-              query: mockQuery,
-              __internalParams: {
-                transaction: { kind: 'itx', id: 'tx-123' },
-              },
-            });
-
-            // Without itx flag, should still use batch transaction
-            expect(mockTransaction).toHaveBeenCalled();
-            expect((mockPrisma as any)._createItxClient).not.toHaveBeenCalled();
-            resolve();
-          } catch (e) { reject(e); }
+      await context.run('tenant-id', async () => {
+        await handler({
+          model: 'User',
+          operation: 'findMany',
+          args: {},
+          query: mockQuery,
+          __internalParams: {
+            transaction: { kind: 'itx', id: 'tx-123' },
+          },
         });
+
+        // Without itx flag, should still use batch transaction
+        expect(mockTransaction).toHaveBeenCalled();
+        expect((mockPrisma as any)._createItxClient).not.toHaveBeenCalled();
       });
     });
 
@@ -980,20 +855,15 @@ describe('createPrismaTenancyExtension', () => {
       const dbError = new Error('connection refused');
       mockTransaction.mockRejectedValue(dbError);
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await expect(
-              handler({
-                model: 'User',
-                operation: 'findMany',
-                args: {},
-                query: jest.fn().mockReturnValue(Promise.resolve([])),
-              }),
-            ).rejects.toThrow('connection refused');
-            resolve();
-          } catch (e) { reject(e); }
-        });
+      await context.run('tenant-id', async () => {
+        await expect(
+          handler({
+            model: 'User',
+            operation: 'findMany',
+            args: {},
+            query: jest.fn().mockReturnValue(Promise.resolve([])),
+          }),
+        ).rejects.toThrow('connection refused');
       });
     });
 
@@ -1006,20 +876,15 @@ describe('createPrismaTenancyExtension', () => {
         return Promise.all(txArray);
       });
 
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-id', async () => {
-          try {
-            await expect(
-              handler({
-                model: 'User',
-                operation: 'findMany',
-                args: {},
-                query: jest.fn().mockReturnValue(Promise.resolve([])),
-              }),
-            ).rejects.toThrow('unrecognized configuration parameter');
-            resolve();
-          } catch (e) { reject(e); }
-        });
+      await context.run('tenant-id', async () => {
+        await expect(
+          handler({
+            model: 'User',
+            operation: 'findMany',
+            args: {},
+            query: jest.fn().mockReturnValue(Promise.resolve([])),
+          }),
+        ).rejects.toThrow('unrecognized configuration parameter');
       });
     });
   });
@@ -1044,30 +909,20 @@ describe('createPrismaTenancyExtension', () => {
       const mockQuery = jest.fn().mockReturnValue(Promise.resolve([]));
 
       await Promise.all([
-        new Promise<void>((resolve, reject) => {
-          context.run('tenant-aaa', async () => {
-            try {
-              await handler({
-                model: 'User',
-                operation: 'findMany',
-                args: {},
-                query: mockQuery,
-              });
-              resolve();
-            } catch (e) { reject(e); }
+        context.run('tenant-aaa', async () => {
+          await handler({
+            model: 'User',
+            operation: 'findMany',
+            args: {},
+            query: mockQuery,
           });
         }),
-        new Promise<void>((resolve, reject) => {
-          context.run('tenant-bbb', async () => {
-            try {
-              await handler({
-                model: 'User',
-                operation: 'findMany',
-                args: {},
-                query: mockQuery,
-              });
-              resolve();
-            } catch (e) { reject(e); }
+        context.run('tenant-bbb', async () => {
+          await handler({
+            model: 'User',
+            operation: 'findMany',
+            args: {},
+            query: mockQuery,
           });
         }),
       ]);

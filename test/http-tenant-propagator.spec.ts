@@ -29,9 +29,9 @@ describe('HttpTenantPropagator', () => {
     expect(propagator.getHeaders()).toEqual({});
   });
 
-  it('should return empty object inside withoutTenant()', async () => {
+  it('should return empty object inside withoutTenant()', () => {
     const propagator = new HttpTenantPropagator(context);
-    await context.runWithoutTenant(() => {
+    context.runWithoutTenant(() => {
       expect(propagator.getHeaders()).toEqual({});
     });
   });

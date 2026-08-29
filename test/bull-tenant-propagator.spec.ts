@@ -57,10 +57,10 @@ describe('BullTenantPropagator', () => {
       });
     });
 
-    it('should return job data unchanged inside withoutTenant()', async () => {
+    it('should return job data unchanged inside withoutTenant()', () => {
       const propagator = new BullTenantPropagator(context);
       const data = { orderId: '123' };
-      await context.runWithoutTenant(() => {
+      context.runWithoutTenant(() => {
         expect(propagator.inject(data)).toBe(data);
       });
     });

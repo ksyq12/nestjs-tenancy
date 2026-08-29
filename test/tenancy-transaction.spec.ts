@@ -34,26 +34,21 @@ describe('tenancyTransaction', () => {
       return cb({ $executeRaw: mockExecuteRaw });
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          const result = await tenancyTransaction(
-            mockPrisma, service, async () => {
-              callOrder.push('callback');
-              return 'callback-result';
-            },
-          );
-          expect(result).toBe('callback-result');
-          expect(mockTransaction).toHaveBeenCalledTimes(1);
-          expect(mockExecuteRaw).toHaveBeenCalledWith(
-            ['SELECT set_config(', ', ', ', TRUE)'],
-            'app.current_tenant',
-            'tenant-123',
-          );
-          expect(callOrder).toEqual(['set_config', 'callback']);
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      const result = await tenancyTransaction(
+        mockPrisma, service, async () => {
+          callOrder.push('callback');
+          return 'callback-result';
+        },
+      );
+      expect(result).toBe('callback-result');
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockExecuteRaw).toHaveBeenCalledWith(
+        ['SELECT set_config(', ', ', ', TRUE)'],
+        'app.current_tenant',
+        'tenant-123',
+      );
+      expect(callOrder).toEqual(['set_config', 'callback']);
     });
   });
 
@@ -72,22 +67,17 @@ describe('tenancyTransaction', () => {
       return cb(mockTx);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await tenancyTransaction(
-            mockPrisma,
-            service,
-            async () => 'ok',
-            { maxWait: 750, timeout: 5000 },
-          );
-          expect(mockTransaction).toHaveBeenCalledWith(
-            expect.any(Function),
-            { maxWait: 750, timeout: 5000 },
-          );
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      await tenancyTransaction(
+        mockPrisma,
+        service,
+        async () => 'ok',
+        { maxWait: 750, timeout: 5000 },
+      );
+      expect(mockTransaction).toHaveBeenCalledWith(
+        expect.any(Function),
+        { maxWait: 750, timeout: 5000 },
+      );
     });
   });
 
@@ -115,15 +105,10 @@ describe('tenancyTransaction', () => {
     });
 
     try {
-      await new Promise<void>((resolve, reject) => {
-        context.run('tenant-123', async () => {
-          try {
-            await tenancyTransaction(
-              mockPrisma, configuredService, async () => 'ok',
-            );
-            resolve();
-          } catch (e) { reject(e); }
-        });
+      await context.run('tenant-123', async () => {
+        await tenancyTransaction(
+          mockPrisma, configuredService, async () => 'ok',
+        );
       });
     } finally {
       await moduleRef.close();
@@ -217,20 +202,15 @@ describe('tenancyTransaction', () => {
       return cb(mockTx);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await tenancyTransaction(
-            mockPrisma, service, async () => 'ok',
-            { isolationLevel: 'Serializable' },
-          );
-          expect(mockTransaction).toHaveBeenCalledWith(
-            expect.any(Function),
-            { isolationLevel: 'Serializable' },
-          );
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      await tenancyTransaction(
+        mockPrisma, service, async () => 'ok',
+        { isolationLevel: 'Serializable' },
+      );
+      expect(mockTransaction).toHaveBeenCalledWith(
+        expect.any(Function),
+        { isolationLevel: 'Serializable' },
+      );
     });
   });
 
@@ -242,20 +222,15 @@ describe('tenancyTransaction', () => {
       return cb(mockTx);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await tenancyTransaction(
-            mockPrisma, service, async () => 'ok',
-            { timeout: 10000, isolationLevel: 'ReadCommitted' },
-          );
-          expect(mockTransaction).toHaveBeenCalledWith(
-            expect.any(Function),
-            { timeout: 10000, isolationLevel: 'ReadCommitted' },
-          );
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      await tenancyTransaction(
+        mockPrisma, service, async () => 'ok',
+        { timeout: 10000, isolationLevel: 'ReadCommitted' },
+      );
+      expect(mockTransaction).toHaveBeenCalledWith(
+        expect.any(Function),
+        { timeout: 10000, isolationLevel: 'ReadCommitted' },
+      );
     });
   });
 
@@ -267,17 +242,12 @@ describe('tenancyTransaction', () => {
       return cb(mockTx);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await expect(
-            tenancyTransaction(mockPrisma, service, async () => {
-              throw new Error('callback failed');
-            }),
-          ).rejects.toThrow('callback failed');
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      await expect(
+        tenancyTransaction(mockPrisma, service, async () => {
+          throw new Error('callback failed');
+        }),
+      ).rejects.toThrow('callback failed');
     });
   });
 
@@ -290,16 +260,11 @@ describe('tenancyTransaction', () => {
       cb({ $executeRaw: jest.fn().mockRejectedValue(settingError) }),
     );
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await expect(
-            tenancyTransaction(mockPrisma, service, callback),
-          ).rejects.toBe(settingError);
-          expect(callback).not.toHaveBeenCalled();
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      await expect(
+        tenancyTransaction(mockPrisma, service, callback),
+      ).rejects.toBe(settingError);
+      expect(callback).not.toHaveBeenCalled();
     });
   });
 
@@ -309,16 +274,11 @@ describe('tenancyTransaction', () => {
     const callback = jest.fn();
     mockTransaction.mockRejectedValue(startError);
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          await expect(
-            tenancyTransaction(mockPrisma, service, callback, { maxWait: 25 }),
-          ).rejects.toBe(startError);
-          expect(callback).not.toHaveBeenCalled();
-          resolve();
-        } catch (e) { reject(e); }
-      });
+    await context.run('tenant-123', async () => {
+      await expect(
+        tenancyTransaction(mockPrisma, service, callback, { maxWait: 25 }),
+      ).rejects.toBe(startError);
+      expect(callback).not.toHaveBeenCalled();
     });
   });
 
@@ -339,20 +299,15 @@ describe('tenancyTransaction', () => {
       $transaction: async (cb) => cb(mockTx),
     };
 
-    await new Promise<void>((resolve, reject) => {
-      context.run('tenant-123', async () => {
-        try {
-          const result = await tenancyTransaction(
-            mockPrisma,
-            service,
-            async (tx) => tx.user.findMany(),
-          );
+    await context.run('tenant-123', async () => {
+      const result = await tenancyTransaction(
+        mockPrisma,
+        service,
+        async (tx) => tx.user.findMany(),
+      );
 
-          expect(result).toEqual(['user-a']);
-          expect(mockTx.user.findMany).toHaveBeenCalled();
-          resolve();
-        } catch (e) { reject(e); }
-      });
+      expect(result).toEqual(['user-a']);
+      expect(mockTx.user.findMany).toHaveBeenCalled();
     });
   });
 });

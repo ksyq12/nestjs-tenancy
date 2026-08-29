@@ -30,9 +30,15 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'test/**/*.ts'],
     rules: {
       '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
+  {
+    files: ['test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/await-thenable': 'error',
     },
   },
 );

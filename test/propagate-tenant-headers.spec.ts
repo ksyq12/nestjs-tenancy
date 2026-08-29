@@ -26,8 +26,8 @@ describe('propagateTenantHeaders', () => {
     });
   });
 
-  it('should return empty object inside withoutTenant()', async () => {
-    await context.runWithoutTenant(() => {
+  it('should return empty object inside withoutTenant()', () => {
+    context.runWithoutTenant(() => {
       expect(propagateTenantHeaders()).toEqual({});
     });
   });

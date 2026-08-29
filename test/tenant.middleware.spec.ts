@@ -167,20 +167,26 @@ describe('TenantMiddleware', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('should accept custom sync validator', (done) => {
+  it('should accept custom sync validator', async () => {
     const mw = createMiddleware({ validateTenantId: (id) => id.startsWith('org_') });
-    mw.use(mockReq({ 'x-tenant-id': 'org_123' }), mockRes(), () => {
+    const next = jest.fn(() => {
       expect(new TenancyContext().getTenantId()).toBe('org_123');
-      done();
     });
+
+    await mw.use(mockReq({ 'x-tenant-id': 'org_123' }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it('should accept async validator', (done) => {
+  it('should accept async validator', async () => {
     const mw = createMiddleware({ validateTenantId: async (id) => id.startsWith('org_') });
-    mw.use(mockReq({ 'x-tenant-id': 'org_456' }), mockRes(), () => {
+    const next = jest.fn(() => {
       expect(new TenancyContext().getTenantId()).toBe('org_456');
-      done();
     });
+
+    await mw.use(mockReq({ 'x-tenant-id': 'org_456' }), mockRes(), next);
+
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   it('should propagate error when async validator throws', async () => {
@@ -192,66 +198,84 @@ describe('TenantMiddleware', () => {
     ).rejects.toThrow('db connection failed');
   });
 
-  it('should accept TenantExtractor object', (done) => {
+  it('should accept TenantExtractor object', async () => {
     const mw = createMiddleware({ tenantExtractor: new HeaderTenantExtractor('x-custom') });
-    mw.use(mockReq({ 'x-custom': '550e8400-e29b-41d4-a716-446655440000' }), mockRes(), () => {
+    const next = jest.fn(() => {
       expect(new TenancyContext().getTenantId()).toBe('550e8400-e29b-41d4-a716-446655440000');
-      done();
     });
+
+    await mw.use(
+      mockReq({ 'x-custom': '550e8400-e29b-41d4-a716-446655440000' }),
+      mockRes(),
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   describe('Lifecycle Hooks', () => {
-    it('should call onTenantResolved after successful extraction', (done) => {
+    it('should call onTenantResolved after successful extraction', async () => {
       const onTenantResolved = jest.fn();
       const mw = createMiddleware({ onTenantResolved });
       const req = mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' });
 
-      mw.use(req, mockRes(), () => {
+      const next = jest.fn(() => {
         expect(onTenantResolved).toHaveBeenCalledWith(
           '550e8400-e29b-41d4-a716-446655440000',
           req,
         );
-        done();
       });
+
+      await mw.use(req, mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should call onTenantResolved inside context.run (getCurrentTenant available)', (done) => {
+    it('should call onTenantResolved inside context.run (getCurrentTenant available)', async () => {
       const onTenantResolved = jest.fn((tenantId: string) => {
         expect(new TenancyContext().getTenantId()).toBe(tenantId);
       });
       const mw = createMiddleware({ onTenantResolved });
+      const next = jest.fn();
 
-      mw.use(
+      await mw.use(
         mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }),
         mockRes(),
-        () => { done(); },
+        next,
       );
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should call onTenantNotFound when no tenant header', (done) => {
+    it('should call onTenantNotFound when no tenant header', async () => {
       const onTenantNotFound = jest.fn();
       const mw = createMiddleware({ onTenantNotFound });
       const req = mockReq();
       const res = mockRes();
 
-      mw.use(req, res, () => {
+      const next = jest.fn(() => {
         expect(onTenantNotFound).toHaveBeenCalledWith(req, res);
-        done();
       });
+
+      await mw.use(req, res, next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should support async hooks', (done) => {
+    it('should support async hooks', async () => {
       const onTenantResolved = jest.fn().mockResolvedValue(undefined);
       const mw = createMiddleware({ onTenantResolved });
+      const next = jest.fn(() => {
+        expect(onTenantResolved).toHaveBeenCalled();
+      });
 
-      mw.use(
+      await mw.use(
         mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' }),
         mockRes(),
-        () => {
-          expect(onTenantResolved).toHaveBeenCalled();
-          done();
-        },
+        next,
       );
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should propagate error from hook', async () => {
@@ -337,16 +361,19 @@ describe('TenantMiddleware', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    it('should call next() when onTenantNotFound returns void', (done) => {
+    it('should call next() when onTenantNotFound returns void', async () => {
       const onTenantNotFound = jest.fn();  // returns undefined
       const mw = createMiddleware({ onTenantNotFound });
       const req = mockReq();
       const res = mockRes();
 
-      mw.use(req, res, () => {
+      const next = jest.fn(() => {
         expect(onTenantNotFound).toHaveBeenCalledWith(req, res);
-        done();
       });
+
+      await mw.use(req, res, next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should not call onTenantResolved when validation fails', async () => {
@@ -389,14 +416,17 @@ describe('TenantMiddleware', () => {
       expect(onCrossCheckFailedOptions.tenantExtractor).toBe('x-tenant-id');
     });
 
-    it('should pass when cross-check matches primary extractor', (done) => {
+    it('should pass when cross-check matches primary extractor', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(VALID_UUID) },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should throw ForbiddenException on mismatch (reject mode)', async () => {
@@ -410,25 +440,31 @@ describe('TenantMiddleware', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should log warning and continue on mismatch (log mode)', (done) => {
+    it('should log warning and continue on mismatch (log mode)', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(OTHER_UUID), onFailed: 'log' },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         // Continued with primary extractor value despite mismatch
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should skip validation when cross-check returns null', (done) => {
+    it('should skip validation when cross-check returns null', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(null), onFailed: 'reject' },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should default to reject mode', async () => {
@@ -480,14 +516,17 @@ describe('TenantMiddleware', () => {
       return { extract: () => value };
     }
 
-    it('should pass when crossCheck.extractor matches', (done) => {
+    it('should pass when crossCheck.extractor matches', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(VALID_UUID) },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should reject on mismatch with crossCheck format', async () => {
@@ -501,14 +540,17 @@ describe('TenantMiddleware', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should log on mismatch with crossCheck log mode', (done) => {
+    it('should log on mismatch with crossCheck log mode', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(OTHER_UUID), onFailed: 'log' },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should default onFailed to reject in crossCheck format', async () => {
@@ -522,18 +564,25 @@ describe('TenantMiddleware', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should NOT emit deprecation warning for new crossCheck format', (done) => {
+    it('should NOT emit deprecation warning for new crossCheck format', async () => {
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
-      const mw = createMiddleware({
-        crossCheck: { extractor: staticExtractor(VALID_UUID) },
-      });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
-        expect(warnSpy).not.toHaveBeenCalledWith(
-          expect.stringContaining('deprecated'),
-        );
+
+      try {
+        const mw = createMiddleware({
+          crossCheck: { extractor: staticExtractor(VALID_UUID) },
+        });
+        const next = jest.fn(() => {
+          expect(warnSpy).not.toHaveBeenCalledWith(
+            expect.stringContaining('deprecated'),
+          );
+        });
+
+        await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+        expect(next).toHaveBeenCalledTimes(1);
+      } finally {
         warnSpy.mockRestore();
-        done();
-      });
+      }
     });
 
     it('should reject when required is true and cross-check returns null', async () => {
@@ -547,34 +596,43 @@ describe('TenantMiddleware', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('should skip when required is false and cross-check returns null', (done) => {
+    it('should skip when required is false and cross-check returns null', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(null), required: false },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should skip by default when cross-check returns null (required defaults to false)', (done) => {
+    it('should skip by default when cross-check returns null (required defaults to false)', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(null) },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should pass when required is true and cross-check matches', (done) => {
+    it('should pass when required is true and cross-check matches', async () => {
       const mw = createMiddleware({
         crossCheck: { extractor: staticExtractor(VALID_UUID), required: true },
       });
-      mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), () => {
+      const next = jest.fn(() => {
         expect(new TenancyContext().getTenantId()).toBe(VALID_UUID);
-        done();
       });
+
+      await mw.use(mockReq({ 'x-tenant-id': VALID_UUID }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
   });
@@ -622,12 +680,12 @@ describe('TenantMiddleware', () => {
   });
 
   describe('Events', () => {
-    it('should emit tenant.resolved on successful extraction', (done) => {
+    it('should emit tenant.resolved on successful extraction', async () => {
       const eventService = createMockEventService();
       const mw = createMiddleware({}, eventService);
       const req = mockReq({ 'x-tenant-id': '550e8400-e29b-41d4-a716-446655440000' });
 
-      mw.use(req, mockRes(), () => {
+      const next = jest.fn(() => {
         expect(eventService.emit).toHaveBeenCalledWith(
           TenancyEvents.RESOLVED,
           expect.objectContaining({
@@ -640,16 +698,19 @@ describe('TenantMiddleware', () => {
           }),
         );
         expect(eventService.emit.mock.calls[0][1]).not.toHaveProperty('request');
-        done();
       });
+
+      await mw.use(req, mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
-    it('should emit tenant.not_found when no tenant', (done) => {
+    it('should emit tenant.not_found when no tenant', async () => {
       const eventService = createMockEventService();
       const mw = createMiddleware({}, eventService);
       const req = mockReq();
 
-      mw.use(req, mockRes(), () => {
+      const next = jest.fn(() => {
         expect(eventService.emit).toHaveBeenCalledWith(
           TenancyEvents.NOT_FOUND,
           expect.objectContaining({
@@ -661,8 +722,11 @@ describe('TenantMiddleware', () => {
           }),
         );
         expect(eventService.emit.mock.calls[0][1]).not.toHaveProperty('request');
-        done();
       });
+
+      await mw.use(req, mockRes(), next);
+
+      expect(next).toHaveBeenCalledTimes(1);
     });
 
     it('should emit tenant.validation_failed on invalid ID', async () => {

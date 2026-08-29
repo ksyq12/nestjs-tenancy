@@ -180,27 +180,20 @@ describe('TenancyContext + RLS Integration', () => {
   });
 
   it('should use TenancyService tenant in SET LOCAL', async () => {
-    await new Promise<void>((resolve, reject) => {
-      context.run(TENANT_1, async () => {
-        try {
-          const tenantId = service.getCurrentTenantOrThrow();
+    await context.run(TENANT_1, async () => {
+      const tenantId = service.getCurrentTenantOrThrow();
 
-          await client.query('BEGIN');
-          await client.query(
-            `SET LOCAL "app.current_tenant" = '${tenantId}'`,
-          );
-          const result = await client.query('SELECT * FROM users');
-          await client.query('COMMIT');
+      await client.query('BEGIN');
+      await client.query(
+        `SET LOCAL "app.current_tenant" = '${tenantId}'`,
+      );
+      const result = await client.query('SELECT * FROM users');
+      await client.query('COMMIT');
 
-          expect(result.rows).toHaveLength(2);
-          expect(
-            result.rows.every((r: any) => r.tenant_id === TENANT_1),
-          ).toBe(true);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      });
+      expect(result.rows).toHaveLength(2);
+      expect(
+        result.rows.every((r: any) => r.tenant_id === TENANT_1),
+      ).toBe(true);
     });
   });
 
