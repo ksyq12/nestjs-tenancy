@@ -13,6 +13,7 @@ export interface GeneratedRelationNames {
   index: string;
   isolationPolicy: string;
   insertPolicy: string;
+  contextGuardPolicy: string;
 }
 
 type GeneratedNameKind = keyof GeneratedRelationNames;
@@ -81,6 +82,12 @@ function descriptors(
       [schema, source.tableName],
       relationIsLegacyCompatible,
     ),
+    contextGuardPolicy: descriptor(
+      'contextGuardPolicy',
+      `tenant_context_guard_${suffix}`,
+      [schema, source.tableName],
+      relationIsLegacyCompatible,
+    ),
   };
 }
 
@@ -120,5 +127,8 @@ export function generateRelationNames(
     index: resolveDescriptor(relationDescriptors.index),
     isolationPolicy: resolveDescriptor(relationDescriptors.isolationPolicy),
     insertPolicy: resolveDescriptor(relationDescriptors.insertPolicy),
+    contextGuardPolicy: resolveDescriptor(
+      relationDescriptors.contextGuardPolicy,
+    ),
   };
 }

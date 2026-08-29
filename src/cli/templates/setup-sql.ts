@@ -6,6 +6,8 @@ import {
   quoteSqlLiteral,
 } from '../../postgres-safety';
 import { generateRelationNames } from '../generated-name';
+import { resolveTenantColumn } from '../tenant-column';
+import type { TenantColumnPolicyType } from '../tenant-column';
 
 export interface SetupSqlOptions {
   models: ParsedModel[];
@@ -90,7 +92,25 @@ function validateOptions(options: SetupSqlOptions): void {
         'Schema PostgreSQL identifier',
       );
     }
+    if (!options.sharedModels.includes(model.modelName)) {
+      resolveTenantColumn(model, options.tenantIdField);
+    }
   }
+}
+
+function tenantPolicyPredicate(
+  tenantColumn: string,
+  settingKeyLiteral: string,
+  policyType: TenantColumnPolicyType,
+): string {
+  if (policyType === 'uuid') {
+    return `${tenantColumn} = NULLIF(current_setting(${settingKeyLiteral}, true), '')::uuid`;
+  }
+  return `${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text`;
+}
+
+function tenantContextGuardPredicate(settingKeyLiteral: string): string {
+  return `NULLIF(current_setting(${settingKeyLiteral}, true), '') IS NOT NULL`;
 }
 
 export function generateSetupSql(options: SetupSqlOptions): string {
@@ -99,6 +119,7 @@ export function generateSetupSql(options: SetupSqlOptions): string {
   const sharedSet = new Set(sharedModels);
   const tenantColumn = quoteSqlIdentifier(tenantIdField);
   const settingKeyLiteral = quoteSqlLiteral(dbSettingKey);
+  const contextGuardPredicate = tenantContextGuardPredicate(settingKeyLiteral);
   const generatedNames = models
     .filter((model) => !sharedSet.has(model.modelName))
     .map((model) => generateRelationNames({
@@ -168,9 +189,16 @@ export function generateSetupSql(options: SetupSqlOptions): string {
       continue;
     }
 
+    const tenantColumnResolution = resolveTenantColumn(model, tenantIdField);
+    const tenantPredicate = tenantPolicyPredicate(
+      tenantColumn,
+      settingKeyLiteral,
+      tenantColumnResolution.policyType,
+    );
     const names = generatedNames[generatedNameIndex++];
     const isolationPolicy = names.isolationPolicy;
     const insertPolicy = names.insertPolicy;
+    const contextGuardPolicy = names.contextGuardPolicy;
     lines.push(`-- ${sqlCommentText(model.modelName)}`);
     lines.push(`ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY;`);
     lines.push(`ALTER TABLE ${tableName} FORCE ROW LEVEL SECURITY;`);
@@ -183,7 +211,7 @@ export function generateSetupSql(options: SetupSqlOptions): string {
       model.tableName,
       [
         `CREATE POLICY ${isolationPolicy} ON ${tableName}`,
-        `  USING (${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text);`,
+        `  USING (${tenantPredicate});`,
       ],
     ));
     lines.push(...createPolicyIfMissing(
@@ -192,7 +220,18 @@ export function generateSetupSql(options: SetupSqlOptions): string {
       model.tableName,
       [
         `CREATE POLICY ${insertPolicy} ON ${tableName}`,
-        `  FOR INSERT WITH CHECK (${tenantColumn} = current_setting(${settingKeyLiteral}, true)::text);`,
+        `  FOR INSERT WITH CHECK (${tenantPredicate});`,
+      ],
+    ));
+    lines.push(...createPolicyIfMissing(
+      contextGuardPolicy,
+      model.schemaName ?? 'public',
+      model.tableName,
+      [
+        `CREATE POLICY ${contextGuardPolicy} ON ${tableName}`,
+        '  AS RESTRICTIVE',
+        `  USING (${contextGuardPredicate})`,
+        `  WITH CHECK (${contextGuardPredicate});`,
       ],
     ));
     lines.push(

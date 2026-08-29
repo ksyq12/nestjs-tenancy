@@ -42,6 +42,12 @@ DROP POLICY IF EXISTS tenant_insert_users ON users;
 CREATE POLICY tenant_insert_users ON users
   FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);
 
+DROP POLICY IF EXISTS tenant_context_guard_users ON users;
+CREATE POLICY tenant_context_guard_users ON users
+  AS RESTRICTIVE
+  USING (NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL)
+  WITH CHECK (NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL);
+
 -- Seed test data
 INSERT INTO users (tenant_id, name, email) VALUES
   ('11111111-1111-1111-1111-111111111111', 'Alice', 'alice@tenant1.com'),
@@ -69,6 +75,10 @@ CREATE POLICY tenant_isolation_force_owner_users ON force_owner_users
   USING (tenant_id = current_setting('app.current_tenant', true)::text);
 CREATE POLICY tenant_insert_force_owner_users ON force_owner_users
   FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);
+CREATE POLICY tenant_context_guard_force_owner_users ON force_owner_users
+  AS RESTRICTIVE
+  USING (NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL)
+  WITH CHECK (NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL);
 
 INSERT INTO force_owner_users (id, tenant_id, name) VALUES
   (1, '11111111-1111-1111-1111-111111111111', 'Owner Alice'),

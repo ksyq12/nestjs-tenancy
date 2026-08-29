@@ -9,6 +9,7 @@ import {
   parseDoctorArgs,
   runDoctor,
 } from '../../src/cli/doctor';
+import { generateRelationNames } from '../../src/cli/generated-name';
 
 jest.mock('pg', () => ({ Client: jest.fn() }));
 
@@ -17,6 +18,10 @@ const TENANT_B = 'tenant-b';
 const URL = 'postgresql://app_user:secret@localhost/database';
 const GENERATED_EXPRESSION =
   "(tenant_id = (current_setting('app.current_tenant'::text, true))::text)";
+const UUID_CATALOG_EXPRESSION =
+  "(tenant_id = (NULLIF(current_setting('app.current_tenant'::text, true), ''::text))::uuid)";
+const CONTEXT_GUARD_EXPRESSION =
+  "(NULLIF(current_setting('app.current_tenant'::text, true), ''::text) IS NOT NULL)";
 
 type Row = Record<string, unknown>;
 
@@ -61,6 +66,18 @@ function insertPolicy(overrides: Row = {}): Row {
   };
 }
 
+function contextGuardPolicy(overrides: Row = {}): Row {
+  return {
+    policy_name: 'tenant_context_guard_users',
+    command: 'ALL',
+    permissive: false,
+    roles: ['PUBLIC'],
+    using_expression: CONTEXT_GUARD_EXPRESSION,
+    with_check_expression: CONTEXT_GUARD_EXPRESSION,
+    ...overrides,
+  };
+}
+
 function healthyState(overrides: Partial<ClientState> = {}): ClientState {
   return {
     session: {
@@ -96,7 +113,7 @@ function healthyState(overrides: Partial<ClientState> = {}): ClientState {
       not_null: true,
       generated: '',
       identity: '',
-      text_compatible: true,
+      policy_type: 'text',
     },
     privileges: {
       schema_usage: true,
@@ -107,7 +124,7 @@ function healthyState(overrides: Partial<ClientState> = {}): ClientState {
       can_truncate: false,
     },
     index: { has_tenant_index: true },
-    policies: [insertPolicy(), isolationPolicy()],
+    policies: [insertPolicy(), isolationPolicy(), contextGuardPolicy()],
     reachableRoles: [],
     setMembershipUnsupported: false,
     settingRows: [],
@@ -363,7 +380,7 @@ describe('doctor missing prerequisites and security findings', () => {
       column: {
         ...healthyState().column,
         not_null: false,
-        text_compatible: false,
+        policy_type: null,
         identity: 'd',
       },
       index: { has_tenant_index: false },
@@ -481,12 +498,20 @@ describe('doctor missing prerequisites and security findings', () => {
 
 describe('doctor policy contract and parser coverage', () => {
   it('uses hashed policy names exactly for lossy table identifiers', async () => {
+    const names = generateRelationNames({
+      schemaName: 'public',
+      tableName: 'audit-logs',
+      tenantIdField: 'tenant_id',
+    });
     const policyRows = [
       insertPolicy({
         policy_name: 'tenant_insert_audit_logs_4aa2515f122e',
       }),
       isolationPolicy({
         policy_name: 'tenant_isolation_audit_logs_ae80b988a44e',
+      }),
+      contextGuardPolicy({
+        policy_name: names.contextGuardPolicy,
       }),
     ];
     const exact = createClient({ policies: policyRows });
@@ -498,6 +523,7 @@ describe('doctor policy contract and parser coverage', () => {
     expect(checksById(exactResult)).toEqual(expect.objectContaining({
       'policy.isolation_exists': 'pass',
       'policy.insert_exists': 'pass',
+      'policy.context_guard_contract': 'pass',
       'policy.no_unexpected_permissive': 'pass',
     }));
 
@@ -506,6 +532,9 @@ describe('doctor policy contract and parser coverage', () => {
         policyRows[0],
         isolationPolicy({
           policy_name: 'TENANT_ISOLATION_AUDIT_LOGS_AE80B988A44E',
+        }),
+        contextGuardPolicy({
+          policy_name: names.contextGuardPolicy,
         }),
       ],
     });
@@ -520,16 +549,19 @@ describe('doctor policy contract and parser coverage', () => {
     }));
   });
 
-  it('reports both generated policies missing and ignores a non-permissive extra policy', async () => {
+  it('reports both generated permissive policies missing and ignores an extra restrictive policy', async () => {
     const mock = createClient({
-      policies: [{
-        policy_name: 'restrictive_extra',
-        command: 'ALL',
-        permissive: false,
-        roles: ['PUBLIC'],
-        using_expression: 'true',
-        with_check_expression: null,
-      }],
+      policies: [
+        contextGuardPolicy(),
+        {
+          policy_name: 'restrictive_extra',
+          command: 'ALL',
+          permissive: false,
+          roles: ['PUBLIC'],
+          using_expression: 'true',
+          with_check_expression: null,
+        },
+      ],
     });
 
     const result = await runDoctor(options(), { clientFactory: () => mock.client });
@@ -537,8 +569,99 @@ describe('doctor policy contract and parser coverage', () => {
     expect(checksById(result)).toEqual(expect.objectContaining({
       'policy.isolation_exists': 'fail',
       'policy.insert_exists': 'fail',
+      'policy.context_guard_contract': 'pass',
       'policy.no_unexpected_permissive': 'pass',
     }));
+  });
+
+  it.each([
+    [
+      'PostgreSQL catalog casts',
+      CONTEXT_GUARD_EXPRESSION,
+    ],
+    [
+      'qualified current_setting without no-op text casts',
+      "(NULLIF(pg_catalog.current_setting('app.current_tenant', true), '') IS NOT NULL)",
+    ],
+  ])('accepts the generated context guard contract with %s', async (
+    _label,
+    expression,
+  ) => {
+    const mock = createClient({
+      policies: [
+        insertPolicy(),
+        isolationPolicy(),
+        contextGuardPolicy({
+          using_expression: expression,
+          with_check_expression: expression,
+        }),
+      ],
+    });
+
+    const result = await runDoctor(options(), { clientFactory: () => mock.client });
+
+    expect(result.status).toBe('healthy');
+    expect(checksById(result)['policy.context_guard_contract']).toBe('pass');
+  });
+
+  it.each([
+    ['missing exact policy', null],
+    ['permissive mode', { permissive: true }],
+    ['wrong role', { roles: ['app_user'] }],
+    ['wrong command', { command: 'SELECT' }],
+    [
+      'wrong setting key',
+      {
+        using_expression: "NULLIF(current_setting('app.other_tenant', true), '') IS NOT NULL",
+        with_check_expression: "NULLIF(current_setting('app.other_tenant', true), '') IS NOT NULL",
+      },
+    ],
+    [
+      'non-empty fallback',
+      {
+        using_expression: "NULLIF(current_setting('app.current_tenant', true), 'missing') IS NOT NULL",
+        with_check_expression: "NULLIF(current_setting('app.current_tenant', true), 'missing') IS NOT NULL",
+      },
+    ],
+    ['null USING expression', { using_expression: null }],
+    [
+      'unparseable USING expression',
+      { using_expression: '$not_a_policy_expression$' },
+    ],
+    [
+      'wrong context function',
+      {
+        using_expression: "NULLIF(set_config('app.current_tenant', true), '') IS NOT NULL",
+      },
+    ],
+    [
+      'non-string setting key',
+      {
+        using_expression: 'NULLIF(current_setting(app.current_tenant, true), \'\') IS NOT NULL',
+      },
+    ],
+    [
+      'wrong null test',
+      {
+        using_expression: "NULLIF(current_setting('app.current_tenant', true), '') IS NULL",
+      },
+    ],
+    ['one-sided expression drift', { with_check_expression: 'true' }],
+    ['wrong exact name', { policy_name: 'tenant_context_guard_other' }],
+  ] as Array<[string, Row | null]>)('rejects context guard drift: %s', async (
+    label,
+    overrides,
+  ) => {
+    const policies = [insertPolicy(), isolationPolicy()];
+    if (overrides) policies.push(contextGuardPolicy(overrides));
+    const mock = createClient({ policies });
+
+    const result = await runDoctor(options(), { clientFactory: () => mock.client });
+
+    expect(checksById(result)['policy.context_guard_contract']).toBe('fail');
+    if (label === 'permissive mode') {
+      expect(checksById(result)['policy.no_unexpected_permissive']).toBe('fail');
+    }
   });
 
   it.each([
@@ -557,6 +680,134 @@ describe('doctor policy contract and parser coverage', () => {
     expect(checksById(result)).toEqual(expect.objectContaining({
       'policy.isolation_contract': 'fail',
       'policy.insert_contract': 'fail',
+    }));
+  });
+
+  it.each([
+    [
+      'PostgreSQL catalog casts',
+      UUID_CATALOG_EXPRESSION,
+    ],
+    [
+      'qualified current_setting without no-op text casts',
+      "(tenant_id = (NULLIF(pg_catalog.current_setting('app.current_tenant', true), ''))::uuid)",
+    ],
+  ])('accepts the generated UUID contract with %s', async (_label, expression) => {
+    const mock = createClient({
+      column: {
+        ...healthyState().column,
+        data_type: 'uuid',
+        policy_type: 'uuid',
+      },
+      policies: [
+        insertPolicy({ with_check_expression: expression }),
+        isolationPolicy({ using_expression: expression }),
+        contextGuardPolicy(),
+      ],
+    });
+
+    const result = await runDoctor(options(), { clientFactory: () => mock.client });
+
+    expect(result.status).toBe('healthy');
+    expect(checksById(result)).toEqual(expect.objectContaining({
+      'catalog.tenant_column_type': 'pass',
+      'policy.isolation_contract': 'pass',
+      'policy.insert_contract': 'pass',
+    }));
+  });
+
+  it.each([
+    [
+      'direct current_setting UUID cast without NULLIF',
+      'uuid',
+      "(tenant_id = (current_setting('app.current_tenant'::text, true))::uuid)",
+    ],
+    [
+      'non-empty NULLIF fallback',
+      'uuid',
+      "(tenant_id = (NULLIF(current_setting('app.current_tenant'::text, true), 'missing'::text))::uuid)",
+    ],
+    [
+      'TEXT final cast for a UUID column',
+      'uuid',
+      "(tenant_id = (NULLIF(current_setting('app.current_tenant'::text, true), ''::text))::text)",
+    ],
+    [
+      'misplaced UUID cast on the tenant column',
+      'uuid',
+      "((tenant_id)::uuid = NULLIF(current_setting('app.current_tenant'::text, true), ''::text))",
+    ],
+    [
+      'TEXT-normalized comparison around a UUID cast',
+      'uuid',
+      "((tenant_id)::text = ((NULLIF(current_setting('app.current_tenant'::text, true), ''::text))::uuid)::text)",
+    ],
+    [
+      'UUID expression for a TEXT column',
+      'text',
+      UUID_CATALOG_EXPRESSION,
+    ],
+  ] as const)(
+    'rejects non-generated policy shape: %s',
+    async (_label, policyType, expression) => {
+      const mock = createClient({
+        column: {
+          ...healthyState().column,
+          data_type: policyType,
+          policy_type: policyType,
+        },
+        policies: [
+          insertPolicy({ with_check_expression: expression }),
+          isolationPolicy({ using_expression: expression }),
+        ],
+      });
+
+      const result = await runDoctor(options(), {
+        clientFactory: () => mock.client,
+      });
+
+      expect(checksById(result)).toEqual(expect.objectContaining({
+        'catalog.tenant_column_type': 'pass',
+        'policy.isolation_contract': 'fail',
+        'policy.insert_contract': 'fail',
+      }));
+    },
+  );
+
+  it.each([
+    [
+      'TEXT',
+      'text',
+      "(tenant_id = current_setting('app.current_tenant'::text, true))",
+    ],
+    [
+      'VARCHAR',
+      'character varying',
+      "((tenant_id)::text = current_setting('app.current_tenant'::text, true))",
+    ],
+  ])('preserves PostgreSQL %s catalog expression matching', async (
+    _label,
+    dataType,
+    expression,
+  ) => {
+    const mock = createClient({
+      column: {
+        ...healthyState().column,
+        data_type: dataType,
+        policy_type: 'text',
+      },
+      policies: [
+        insertPolicy({ with_check_expression: expression }),
+        isolationPolicy({ using_expression: expression }),
+      ],
+    });
+
+    const result = await runDoctor(options(), { clientFactory: () => mock.client });
+
+    expect(checksById(result)).toEqual(expect.objectContaining({
+      'catalog.tenant_column_type': 'pass',
+      'policy.isolation_contract': 'pass',
+      'policy.insert_contract': 'pass',
     }));
   });
 

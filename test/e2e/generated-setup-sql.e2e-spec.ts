@@ -132,6 +132,7 @@ describe('generated setup SQL', () => {
       `, [SCHEMA_NAME, TABLE_NAME]);
       expect(policies.rows).toEqual(initialPolicies.rows);
       expect(policies.rows.map(({ policy_name }) => policy_name)).toEqual([
+        'tenant_context_guard_tenant__ops_ledger_tenancy_po_e35173f6f2dc',
         'tenant_insert_tenant__ops_ledger_tenancy_policy__a_4e1d1fe89a31',
         'tenant_isolation_tenant__ops_ledger_tenancy_policy_919ed50e5791',
       ]);
@@ -233,7 +234,7 @@ describe('generated setup SQL', () => {
           schema_name: 'public',
           relrowsecurity: true,
           relforcerowsecurity: true,
-          policy_count: 2,
+          policy_count: 3,
           can_select: true,
         },
       ]);
@@ -419,13 +420,13 @@ describe('generated setup SQL', () => {
       expect(generatedObjects.rows).toHaveLength(models.length);
       expect(generatedObjects.rows.every(
         ({ index_names, policy_names }) =>
-          index_names.length === 1 && policy_names.length === 2,
+          index_names.length === 1 && policy_names.length === 3,
       )).toBe(true);
 
       const indexNames = generatedObjects.rows.flatMap(({ index_names }) => index_names);
       const policyNames = generatedObjects.rows.flatMap(({ policy_names }) => policy_names);
       expect(new Set(indexNames).size).toBe(models.length);
-      expect(new Set(policyNames).size).toBe(models.length * 2);
+      expect(new Set(policyNames).size).toBe(models.length * 3);
       expect([...indexNames, ...policyNames].every(
         (identifier) => Buffer.byteLength(identifier, 'utf8') <= 63,
       )).toBe(true);

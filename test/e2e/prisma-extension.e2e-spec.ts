@@ -13,6 +13,7 @@ const TENANT_2 = '22222222-2222-2222-2222-222222222222';
 const CUSTOM_SETTING_KEY = 'app.direct_custom_tenant';
 const CUSTOM_SELECT_POLICY = 'ten_m03_direct_custom_tenant_select';
 const CUSTOM_SELECT_GUARD_POLICY = 'ten_m03_direct_custom_tenant_guard';
+const GENERATED_CONTEXT_GUARD_POLICY = 'tenant_context_guard_users';
 
 const ADMIN_URL =
   process.env.DATABASE_URL ?? 'postgresql://tenancy:tenancy@localhost:5433/tenancy_test';
@@ -131,6 +132,7 @@ describe('Prisma 7 canonical custom dbSettingKey integration', () => {
     // restrictive guard prevents the fixture's default-key policy from making
     // this regression pass if runtime configuration falls back to that key.
     await sharedAdminClient.query(`
+      DROP POLICY IF EXISTS ${GENERATED_CONTEXT_GUARD_POLICY} ON users;
       DROP POLICY IF EXISTS ${CUSTOM_SELECT_GUARD_POLICY} ON users;
       DROP POLICY IF EXISTS ${CUSTOM_SELECT_POLICY} ON users;
       CREATE POLICY ${CUSTOM_SELECT_POLICY} ON users
@@ -144,6 +146,14 @@ describe('Prisma 7 canonical custom dbSettingKey integration', () => {
         FOR SELECT
         USING (
           tenant_id = current_setting('${CUSTOM_SETTING_KEY}', true)::text
+        );
+      CREATE POLICY ${GENERATED_CONTEXT_GUARD_POLICY} ON users
+        AS RESTRICTIVE
+        USING (
+          NULLIF(current_setting('${CUSTOM_SETTING_KEY}', true), '') IS NOT NULL
+        )
+        WITH CHECK (
+          NULLIF(current_setting('${CUSTOM_SETTING_KEY}', true), '') IS NOT NULL
         );
     `);
 
@@ -172,8 +182,17 @@ describe('Prisma 7 canonical custom dbSettingKey integration', () => {
         if (moduleRef) await moduleRef.close();
       } finally {
         await sharedAdminClient.query(`
+          DROP POLICY IF EXISTS ${GENERATED_CONTEXT_GUARD_POLICY} ON users;
           DROP POLICY IF EXISTS ${CUSTOM_SELECT_GUARD_POLICY} ON users;
           DROP POLICY IF EXISTS ${CUSTOM_SELECT_POLICY} ON users;
+          CREATE POLICY ${GENERATED_CONTEXT_GUARD_POLICY} ON users
+            AS RESTRICTIVE
+            USING (
+              NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL
+            )
+            WITH CHECK (
+              NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL
+            );
         `);
       }
     }

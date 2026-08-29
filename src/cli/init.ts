@@ -5,6 +5,7 @@ import { generateSetupSql } from './templates/setup-sql';
 import { generateModuleSetup } from './templates/module-setup';
 import { isValidPostgresSettingKey } from '../postgres-safety';
 import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
+import { resolveTenantColumn } from './tenant-column';
 
 interface InitOptions {
   cwd?: string;
@@ -52,8 +53,15 @@ export async function runInit(options?: InitOptions): Promise<InitResult> {
   let models: ReturnType<typeof parseModels> = [];
 
   if (schemaPath) {
-    const schemaContent = fs.readFileSync(schemaPath, 'utf-8');
-    models = parseModels(schemaContent);
+    try {
+      const schemaContent = fs.readFileSync(schemaPath, 'utf-8');
+      models = parseModels(schemaContent);
+    } catch (error) {
+      console.error(
+        `Cannot parse Prisma schema for tenancy scaffolding: ${(error as Error).message}`,
+      );
+      return 'invalid';
+    }
     console.log(`Found ${models.length} model(s) in ${path.relative(cwd, schemaPath) || 'schema.prisma'}`);
     const multiSchemaModels = models.filter((m) => m.schemaName);
     if (multiSchemaModels.length > 0) {
@@ -150,11 +158,28 @@ export async function runInit(options?: InitOptions): Promise<InitResult> {
   let sql: string;
   let moduleSetup: string;
   try {
+    const tenantIdField = 'tenant_id';
+    const sharedSet = new Set(sharedModels);
+    const tenantColumns = models
+      .filter((model) => !sharedSet.has(model.modelName))
+      .map((model) => resolveTenantColumn(model, tenantIdField));
+    const logicalTenantFields = new Set(
+      tenantColumns.map((column) => column.fieldName),
+    );
+    if (response.autoInject && logicalTenantFields.size > 1) {
+      throw new Error(
+        'Cannot enable autoInjectTenantId because tenant-scoped models use ' +
+        `different logical Prisma tenant fields (${[...logicalTenantFields].join(', ')}). ` +
+        'Use one logical field name across models or disable auto-injection.',
+      );
+    }
+    const logicalTenantIdField = tenantColumns[0]?.fieldName ?? tenantIdField;
+
     sql = generateSetupSql({
       models,
       dbSettingKey: response.dbSettingKey,
       sharedModels,
-      tenantIdField: 'tenant_id',
+      tenantIdField,
     });
 
     moduleSetup = generateModuleSetup({
@@ -164,6 +189,7 @@ export async function runInit(options?: InitOptions): Promise<InitResult> {
       sharedModels,
       tenantFormat: response.tenantFormat,
       customRegex: response.customRegex,
+      tenantIdField: logicalTenantIdField,
     });
   } catch (error) {
     console.error(`Cannot generate tenancy files: ${(error as Error).message}`);
@@ -183,8 +209,8 @@ export async function runInit(options?: InitOptions): Promise<InitResult> {
   await writeFileWithConfirm(prompts, path.join(cwd, 'tenancy.module-setup.ts'), moduleSetup);
 
   console.log('\nNext steps:');
-  console.log('1. Add tenant_id column to your Prisma models');
-  console.log('2. Run: npx prisma migrate dev');
+  console.log('1. Review the detected tenant_id field types in tenancy-setup.sql');
+  console.log('2. Run: npx prisma migrate dev (if the schema is not applied yet)');
   console.log('3. Run tenancy-setup.sql against your database');
   console.log('4. Copy the module setup into your AppModule');
   return 'completed';

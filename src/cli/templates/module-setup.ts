@@ -12,6 +12,8 @@ export interface ModuleSetupOptions {
   sharedModels: string[];
   tenantFormat?: string;
   customRegex?: string;
+  /** Logical Prisma field name used by auto-injection. */
+  tenantIdField?: string;
 }
 
 export function generateModuleSetup(options: ModuleSetupOptions): string {
@@ -102,6 +104,11 @@ export function generateModuleSetup(options: ModuleSetupOptions): string {
     lines.push('//   createPrismaTenancyExtension(tenancyService, {');
     if (options.autoInjectTenantId) {
       lines.push('//     autoInjectTenantId: true,');
+      if (options.tenantIdField && options.tenantIdField !== 'tenant_id') {
+        lines.push(
+          `//     tenantIdField: ${serializeTypeScriptString(options.tenantIdField)},`,
+        );
+      }
     }
     if (options.sharedModels.length > 0) {
       lines.push(

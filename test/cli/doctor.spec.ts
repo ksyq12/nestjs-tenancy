@@ -11,6 +11,10 @@ import { runCli } from '../../src/cli';
 
 const TENANT_A = '11111111-1111-1111-1111-111111111111';
 const TENANT_B = '22222222-2222-2222-2222-222222222222';
+const UUID_POLICY_EXPRESSION =
+  "(tenant_id = (NULLIF(current_setting('app.current_tenant'::text, true), ''::text))::uuid)";
+const CONTEXT_GUARD_EXPRESSION =
+  "(NULLIF(current_setting('app.current_tenant'::text, true), ''::text) IS NOT NULL)";
 
 interface MockState {
   currentUser: string;
@@ -27,7 +31,8 @@ interface MockState {
   owner: string;
   columnExists: boolean;
   columnNotNull: boolean;
-  columnTextCompatible: boolean;
+  columnDataType: string;
+  columnPolicyType: 'text' | 'uuid' | null;
   canSelect: boolean;
   reachableRoles: Array<Record<string, unknown>>;
   setMembershipUnsupported: boolean;
@@ -36,6 +41,7 @@ interface MockState {
   noContextVisible: boolean;
   isolationExpression: string;
   insertExpression: string;
+  contextGuardExpression: string;
 }
 
 function healthyState(overrides: Partial<MockState> = {}): MockState {
@@ -54,7 +60,8 @@ function healthyState(overrides: Partial<MockState> = {}): MockState {
     owner: 'table_owner',
     columnExists: true,
     columnNotNull: true,
-    columnTextCompatible: true,
+    columnDataType: 'text',
+    columnPolicyType: 'text',
     canSelect: true,
     reachableRoles: [],
     setMembershipUnsupported: false,
@@ -66,6 +73,7 @@ function healthyState(overrides: Partial<MockState> = {}): MockState {
     noContextVisible: false,
     isolationExpression: "(tenant_id = (current_setting('app.current_tenant'::text, true))::text)",
     insertExpression: "(tenant_id = (current_setting('app.current_tenant'::text, true))::text)",
+    contextGuardExpression: CONTEXT_GUARD_EXPRESSION,
     ...overrides,
   };
 }
@@ -118,11 +126,11 @@ function createClient(state: MockState): {
     if (sql.includes('FROM pg_catalog.pg_attribute AS a')) {
       return { rows: state.columnExists ? [{
         attribute_number: 2,
-        data_type: 'text',
+        data_type: state.columnDataType,
         not_null: state.columnNotNull,
         generated: '',
         identity: '',
-        text_compatible: state.columnTextCompatible,
+        policy_type: state.columnPolicyType,
       }] : [] };
     }
     if (sql.includes('pg_catalog.has_table_privilege')) {
@@ -155,6 +163,14 @@ function createClient(state: MockState): {
           roles: ['PUBLIC'],
           using_expression: state.isolationExpression,
           with_check_expression: null,
+        },
+        {
+          policy_name: 'tenant_context_guard_users',
+          command: 'ALL',
+          permissive: false,
+          roles: ['PUBLIC'],
+          using_expression: state.contextGuardExpression,
+          with_check_expression: state.contextGuardExpression,
         },
         ...state.extraPolicies,
       ] };
@@ -218,6 +234,7 @@ describe('runDoctor', () => {
       expect.objectContaining({ id: 'catalog.rls_forced', status: 'pass' }),
       expect.objectContaining({ id: 'policy.isolation_contract', status: 'pass' }),
       expect.objectContaining({ id: 'policy.insert_contract', status: 'pass' }),
+      expect.objectContaining({ id: 'policy.context_guard_contract', status: 'pass' }),
       expect.objectContaining({ id: 'probe.active', status: 'skip' }),
     ]));
     expect(mock.connect).toHaveBeenCalledTimes(1);
@@ -250,8 +267,84 @@ describe('runDoctor', () => {
     expect(calls).toContainEqual(['SELECT set_config($1, $2, true)', ['app.current_tenant', TENANT_B]]);
     const probeSql = calls.find(([sql]) => sql.includes('AS has_mismatch'))?.[0] ?? '';
     expect(probeSql).toContain('FROM "public"."users"');
+    expect(probeSql).toContain('"tenant_id"::text IS DISTINCT FROM $1');
+    expect(probeSql).not.toContain('$1::uuid');
     expect(probeSql).not.toContain(TENANT_A);
     expect(probeSql).not.toContain(TENANT_B);
+  });
+
+  it('accepts UUID catalog policies and uses UUID semantics for active mismatch probes', async () => {
+    const mock = createClient(healthyState({
+      columnDataType: 'uuid',
+      columnPolicyType: 'uuid',
+      isolationExpression: UUID_POLICY_EXPRESSION,
+      insertExpression: UUID_POLICY_EXPRESSION,
+    }));
+
+    const result = await runDoctor(baseOptions(true), {
+      clientFactory: () => mock.client,
+    });
+
+    expect(result.status).toBe('healthy');
+    expect(result.exitCode).toBe(DoctorExitCode.HEALTHY);
+    expect(result.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'catalog.tenant_column_type',
+        status: 'pass',
+        message: 'Tenant column type uuid matches generated UUID policy semantics.',
+      }),
+      expect.objectContaining({ id: 'policy.isolation_contract', status: 'pass' }),
+      expect.objectContaining({ id: 'policy.insert_contract', status: 'pass' }),
+      expect.objectContaining({ id: 'policy.context_guard_contract', status: 'pass' }),
+      expect.objectContaining({ id: 'probe.tenant_a', status: 'pass' }),
+      expect.objectContaining({ id: 'probe.tenant_b', status: 'pass' }),
+    ]));
+
+    const probeSql = (mock.query.mock.calls as Array<[
+      string,
+      readonly unknown[] | undefined,
+    ]>)
+      .filter(([sql]) => sql.includes('AS has_mismatch'))
+      .map(([sql]) => sql);
+    expect(probeSql).toHaveLength(2);
+    expect(probeSql).toEqual(expect.arrayContaining([
+      expect.stringContaining('"tenant_id" IS DISTINCT FROM $1::uuid'),
+    ]));
+    expect(probeSql.every((sql) =>
+      !sql.includes('"tenant_id"::text IS DISTINCT FROM $1')
+    )).toBe(true);
+  });
+
+  it('reports invalid UUID active probe values before starting a transaction', async () => {
+    const mock = createClient(healthyState({
+      columnDataType: 'uuid',
+      columnPolicyType: 'uuid',
+      isolationExpression: UUID_POLICY_EXPRESSION,
+      insertExpression: UUID_POLICY_EXPRESSION,
+    }));
+
+    const result = await runDoctor({
+      ...baseOptions(true),
+      tenantA: 'not-a-uuid',
+      tenantB: 'also-not-a-uuid',
+    }, { clientFactory: () => mock.client });
+
+    expect(result.status).toBe('unhealthy');
+    expect(result.exitCode).toBe(DoctorExitCode.FINDINGS);
+    expect(result.error).toBeUndefined();
+    expect(result.checks).toContainEqual(expect.objectContaining({
+      id: 'probe.active',
+      status: 'fail',
+      message: expect.stringContaining('--tenant-a'),
+      details: {
+        tenantColumnType: 'uuid',
+        invalidOptions: ['--tenant-a', '--tenant-b'],
+      },
+    }));
+    expect(mock.query).not.toHaveBeenCalledWith('BEGIN READ ONLY');
+    expect((mock.query.mock.calls as Array<[string]>).some(([sql]) =>
+      sql.includes('AS has_mismatch')
+    )).toBe(false);
   });
 
   it('fails role, FORCE, owner reachability, and unexpected permissive policy risks', async () => {

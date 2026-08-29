@@ -125,7 +125,7 @@ describe('live PostgreSQL doctor', () => {
     });
   });
 
-  it('detects an unexpected permissive policy in the catalog and active probe', async () => {
+  it('detects an unexpected permissive policy while the context guard keeps no-context fail-closed', async () => {
     const adminClient = new Client({ connectionString: ADMIN_URL });
 
     try {
@@ -160,10 +160,10 @@ describe('live PostgreSQL doctor', () => {
         );
         expect(check(result, 'probe.no_context')).toEqual(
           expect.objectContaining({
-            status: 'fail',
+            status: 'pass',
             details: {
               settingEmpty: true,
-              hasVisibleRows: true,
+              hasVisibleRows: false,
             },
           }),
         );

@@ -1,7 +1,90 @@
+export interface ParsedNativeType {
+  namespace: string;
+  name: string;
+  args?: string;
+}
+
+export interface ParsedField {
+  fieldName: string;
+  columnName: string;
+  scalarType: string;
+  arity: 'required' | 'optional' | 'list';
+  nativeTypes: ParsedNativeType[];
+  ignored?: boolean;
+}
+
 export interface ParsedModel {
   modelName: string;
   tableName: string;
   schemaName?: string;
+  /** Present on parser-origin models; omitted by legacy direct template callers. */
+  fields?: ParsedField[];
+}
+
+const PRISMA_IDENTIFIER_SOURCE = String.raw`[_\p{ID_Start}][_\p{ID_Continue}]*`;
+const LEADING_PRISMA_IDENTIFIER = new RegExp(
+  `^(${PRISMA_IDENTIFIER_SOURCE})`,
+  'u',
+);
+const FIELD_DEFINITION_START = new RegExp(
+  `^\\s*${PRISMA_IDENTIFIER_SOURCE}\\s+`,
+  'u',
+);
+const MODEL_START = new RegExp(
+  `^model\\s+(${PRISMA_IDENTIFIER_SOURCE})\\s*\\{`,
+  'u',
+);
+const NATIVE_TYPE_START = new RegExp(
+  `^@(${PRISMA_IDENTIFIER_SOURCE})\\.(${PRISMA_IDENTIFIER_SOURCE})`,
+  'u',
+);
+const PRISMA_IDENTIFIER_CONTINUE = /^[_\p{ID_Continue}]$/u;
+
+function isPrismaIdentifierContinueAt(value: string, index: number): boolean {
+  const codePoint = value.codePointAt(index);
+  return codePoint !== undefined &&
+    PRISMA_IDENTIFIER_CONTINUE.test(String.fromCodePoint(codePoint));
+}
+
+function parseParenthesized(
+  value: string,
+  openIndex: number,
+): { contents: string; end: number } | undefined {
+  if (value[openIndex] !== '(') return undefined;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = openIndex; index < value.length; index++) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+    } else if (character === '(') {
+      depth++;
+    } else if (character === ')') {
+      depth--;
+      if (depth === 0) {
+        return {
+          contents: value.slice(openIndex + 1, index),
+          end: index + 1,
+        };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function parseMapping(
@@ -31,7 +114,7 @@ function parseMapping(
     }
     if (
       !body.startsWith(token, index) ||
-      /\w/.test(body[index + token.length] ?? '')
+      isPrismaIdentifierContinueAt(body, index + token.length)
     ) {
       continue;
     }
@@ -71,6 +154,207 @@ function decodePrismaStringLiteral(literal: string): string {
   }
 
   return decoded;
+}
+
+function parseFieldMap(definition: string): string | undefined {
+  let mapping: string | undefined;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < definition.length; index++) {
+    const character = definition[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (
+      character !== '@' ||
+      definition[index - 1] === '@' ||
+      !definition.startsWith('@map', index) ||
+      definition[index + 4] === '.' ||
+      isPrismaIdentifierContinueAt(definition, index + 4)
+    ) {
+      continue;
+    }
+
+    const match = /^@map\s*\(\s*("(?:\\.|[^"\\])*")\s*\)/
+      .exec(definition.slice(index));
+    if (!match) throw new Error('Invalid Prisma field @map directive.');
+    if (mapping !== undefined) {
+      throw new Error('A Prisma field cannot declare more than one @map directive.');
+    }
+    try {
+      mapping = decodePrismaStringLiteral(match[1]);
+    } catch {
+      throw new Error('Invalid Prisma field @map string literal.');
+    }
+    index += match[0].length - 1;
+  }
+
+  return mapping;
+}
+
+function hasFieldDirective(definition: string, directive: string): boolean {
+  const token = `@${directive}`;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < definition.length; index++) {
+    const character = definition[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (
+      character === '@' &&
+      definition[index - 1] !== '@' &&
+      definition.startsWith(token, index) &&
+      definition[index + token.length] !== '.' &&
+      !isPrismaIdentifierContinueAt(definition, index + token.length)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function parseNativeTypes(definition: string): ParsedNativeType[] {
+  const nativeTypes: ParsedNativeType[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < definition.length; index++) {
+    const character = definition[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character !== '@' || definition[index - 1] === '@') continue;
+
+    const match = NATIVE_TYPE_START.exec(definition.slice(index));
+    if (!match) continue;
+    let end = index + match[0].length;
+    let argumentStart = end;
+    while (/\s/.test(definition[argumentStart] ?? '')) argumentStart++;
+    const argumentsGroup = definition[argumentStart] === '('
+      ? parseParenthesized(definition, argumentStart)
+      : undefined;
+    nativeTypes.push({
+      namespace: match[1],
+      name: match[2],
+      ...(argumentsGroup === undefined
+        ? {}
+        : { args: argumentsGroup.contents.trim() }),
+    });
+    if (argumentsGroup !== undefined) end = argumentsGroup.end;
+    index = end - 1;
+  }
+
+  return nativeTypes;
+}
+
+function parseFieldType(
+  definition: string,
+): { scalarType: string; end: number } | undefined {
+  const match = LEADING_PRISMA_IDENTIFIER.exec(definition);
+  if (!match) return undefined;
+  if (match[1] !== 'Unsupported') {
+    return { scalarType: match[1], end: match[0].length };
+  }
+
+  let openIndex = match[0].length;
+  while (/\s/.test(definition[openIndex] ?? '')) openIndex++;
+  if (definition[openIndex] !== '(') {
+    return { scalarType: match[1], end: match[0].length };
+  }
+  const unsupported = parseParenthesized(definition, openIndex);
+  if (unsupported === undefined) return undefined;
+  return { scalarType: 'Unsupported', end: unsupported.end };
+}
+
+function parseFields(body: string): ParsedField[] {
+  const fields: ParsedField[] = [];
+  const definitions: string[] = [];
+
+  for (const line of body.split('\n')) {
+    if (FIELD_DEFINITION_START.test(line)) {
+      definitions.push(line.trim());
+    } else if (/^\s*@(?!@)/.test(line) && definitions.length > 0) {
+      definitions[definitions.length - 1] += ` ${line.trim()}`;
+    }
+  }
+
+  for (const definitionLine of definitions) {
+    const fieldMatch = LEADING_PRISMA_IDENTIFIER.exec(definitionLine);
+    if (!fieldMatch) continue;
+    let typeStart = fieldMatch[0].length;
+    if (!/\s/.test(definitionLine[typeStart] ?? '')) continue;
+    while (/\s/.test(definitionLine[typeStart] ?? '')) typeStart++;
+
+    const fieldType = parseFieldType(definitionLine.slice(typeStart));
+    if (fieldType === undefined) continue;
+    let definitionStart = typeStart + fieldType.end;
+    let arity: ParsedField['arity'] = 'required';
+    if (definitionLine.startsWith('?', definitionStart)) {
+      arity = 'optional';
+      definitionStart++;
+    } else if (definitionLine.startsWith('[]', definitionStart)) {
+      arity = 'list';
+      definitionStart += 2;
+    }
+
+    if (
+      definitionStart < definitionLine.length &&
+      !/\s/.test(definitionLine[definitionStart])
+    ) {
+      continue;
+    }
+    const definition = definitionLine.slice(definitionStart).trimStart();
+    fields.push({
+      fieldName: fieldMatch[1],
+      columnName: parseFieldMap(definition) ?? fieldMatch[1],
+      scalarType: fieldType.scalarType,
+      arity,
+      nativeTypes: parseNativeTypes(definition),
+      ...(hasFieldDirective(definition, 'ignore') ? { ignored: true } : {}),
+    });
+  }
+
+  return fields;
 }
 
 function scanPrismaLine(
@@ -145,7 +429,7 @@ export function parseModels(schemaContent: string): ParsedModel[] {
     inBlockComment = scanned.inBlockComment;
 
     if (currentModel === null) {
-      const modelStart = scanned.content.match(/^model\s+(\w+)\s*\{/);
+      const modelStart = MODEL_START.exec(scanned.content);
       if (modelStart) {
         currentModel = modelStart[1];
         body = '';
@@ -159,7 +443,12 @@ export function parseModels(schemaContent: string): ParsedModel[] {
     if (depth <= 0) {
       const tableName = parseMapping(body, 'map') ?? currentModel;
       const schemaName = parseMapping(body, 'schema');
-      models.push({ modelName: currentModel, tableName, schemaName });
+      models.push({
+        modelName: currentModel,
+        tableName,
+        schemaName,
+        fields: parseFields(body),
+      });
       currentModel = null;
     } else {
       body += scanned.content + '\n';

@@ -56,10 +56,50 @@ describe('CLI init', () => {
     expect(sql).toContain('app.current_tenant');
   });
 
+  itWithTempDirectory('should generate UUID policy SQL and mapped logical tenant injection config', async (tmpDir) => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      `model Account {
+  id       Int    @id
+  tenantId String @db.Uuid @map("tenant_id")
+}
+`,
+    );
+
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: true,
+      sharedModels: '',
+    });
+
+    await expect(runInit({ cwd: tmpDir })).resolves.toBe('completed');
+
+    const sql = fs.readFileSync(
+      path.join(tmpDir, 'tenancy-setup.sql'),
+      'utf-8',
+    );
+    const moduleSetup = fs.readFileSync(
+      path.join(tmpDir, 'tenancy.module-setup.ts'),
+      'utf-8',
+    );
+    const uuidPredicate =
+      `"tenant_id" = NULLIF(current_setting('app.current_tenant', true), '')::uuid`;
+
+    expect(sql.split(uuidPredicate)).toHaveLength(3);
+    expect(sql).not.toContain(
+      `"tenant_id" = current_setting('app.current_tenant', true)::text`,
+    );
+    expect(moduleSetup).toContain('//     autoInjectTenantId: true,');
+    expect(moduleSetup).toContain('//     tenantIdField: "tenantId",');
+  });
+
   itWithTempDirectory('should generate module setup file', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
-      'model User {\n  id Int @id\n}\n',
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
     );
 
     const prompts = require('prompts') as jest.Mock;
@@ -82,7 +122,7 @@ describe('CLI init', () => {
   itWithTempDirectory('should handle @@map in schema', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
-      'model User {\n  id Int @id\n\n  @@map("users")\n}\n',
+      'model User {\n  id Int @id\n  tenant_id String\n\n  @@map("users")\n}\n',
     );
 
     const prompts = require('prompts') as jest.Mock;
@@ -209,7 +249,7 @@ describe('CLI init', () => {
   itWithTempDirectory('should not overwrite without confirmation', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
-      'model User {\n  id Int @id\n}\n',
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
     );
     fs.writeFileSync(path.join(tmpDir, 'tenancy-setup.sql'), 'existing content');
 
@@ -252,7 +292,7 @@ describe('CLI init', () => {
   itWithTempDirectory('should include validateTenantId in module setup when tenantFormat is Custom', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
-      'model User {\n  id Int @id\n}\n',
+      'model User {\n  id Int @id\n  tenant_id String\n}\n',
     );
 
     const prompts = require('prompts') as jest.Mock;
@@ -436,7 +476,7 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  itWithTempDirectory('should pass shared models to SQL and module setup', async (tmpDir) => {
+  itWithTempDirectory('should exempt shared models without tenant fields from type validation', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n\nmodel Country {\n  id Int @id\n  name String\n}\n',
@@ -451,9 +491,13 @@ describe('CLI init', () => {
       sharedModels: 'Country',
     });
 
-    await runInit({ cwd: tmpDir });
+    await expect(runInit({ cwd: tmpDir })).resolves.toBe('completed');
 
     const sql = fs.readFileSync(path.join(tmpDir, 'tenancy-setup.sql'), 'utf-8');
+    const moduleSetup = fs.readFileSync(
+      path.join(tmpDir, 'tenancy.module-setup.ts'),
+      'utf-8',
+    );
     // Country should NOT have RLS policies (it's shared)
     expect(sql).not.toContain(
       'ALTER TABLE "public"."Country" ENABLE ROW LEVEL SECURITY',
@@ -462,6 +506,100 @@ describe('CLI init', () => {
     expect(sql).toContain(
       'ALTER TABLE "public"."User" ENABLE ROW LEVEL SECURITY',
     );
+    expect(moduleSetup).toContain('sharedModels: ["Country"],');
+  });
+
+  it.each([
+    {
+      label: 'missing tenant column',
+      field: 'name String',
+      expectedError: 'does not map a field to tenant column "tenant_id"',
+    },
+    {
+      label: 'unsupported native type',
+      field: 'tenant_id String @db.Inet',
+      expectedError: 'unsupported native type @db.Inet',
+    },
+    {
+      label: 'nullable tenant field',
+      field: 'tenant_id String?',
+      expectedError: 'is optional',
+    },
+    {
+      label: 'list tenant field',
+      field: 'tenant_id String[]',
+      expectedError: 'is list',
+    },
+  ])('should reject $label before writing generated files', async ({
+    field,
+    expectedError,
+  }) => {
+    await withTempDirectory(async (tmpDir) => {
+      fs.writeFileSync(
+        path.join(tmpDir, 'schema.prisma'),
+        `model Account {\n  id Int @id\n  ${field}\n}\n`,
+      );
+      const prompts = require('prompts') as jest.Mock;
+      prompts.mockResolvedValue({
+        extractor: 'Header (X-Tenant-Id)',
+        tenantFormat: 'UUID',
+        dbSettingKey: 'app.current_tenant',
+        autoInject: true,
+        sharedModels: '',
+      });
+      const consoleSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+
+      await expect(runInit({ cwd: tmpDir })).resolves.toBe('invalid');
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Model Account'),
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(expectedError),
+      );
+      expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts')))
+        .toBe(false);
+    });
+  });
+
+  itWithTempDirectory('should reject mixed logical tenant fields when auto-injection is enabled', async (tmpDir) => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'schema.prisma'),
+      `model Account {
+  id       Int    @id
+  tenantId String @map("tenant_id")
+}
+
+model Invoice {
+  id             Int    @id
+  organizationId String @map("tenant_id")
+}
+`,
+    );
+    const prompts = require('prompts') as jest.Mock;
+    prompts.mockResolvedValue({
+      extractor: 'Header (X-Tenant-Id)',
+      tenantFormat: 'UUID',
+      dbSettingKey: 'app.current_tenant',
+      autoInject: true,
+      sharedModels: '',
+    });
+    const consoleSpy = jest
+      .spyOn(console, 'error')
+      .mockImplementation(() => {});
+
+    await expect(runInit({ cwd: tmpDir })).resolves.toBe('invalid');
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /different logical Prisma tenant fields \(tenantId, organizationId\)/,
+      ),
+    );
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
   });
 
   itWithTempDirectory('should log multi-schema info when models use @@schema()', async (tmpDir) => {

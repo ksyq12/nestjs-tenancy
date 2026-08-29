@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as ts from 'typescript';
+import { parseModels } from '../../src/cli/prisma-schema-parser';
 import { generateSetupSql } from '../../src/cli/templates/setup-sql';
 import { generateModuleSetup } from '../../src/cli/templates/module-setup';
 
@@ -86,9 +87,64 @@ describe('generateSetupSql', () => {
       'CREATE POLICY tenant_insert_User_b8b33f29d481 ON "public"."User"',
     );
     expect(sql).toContain(
+      'CREATE POLICY tenant_context_guard_User_ece5e1ee8731 ON "public"."User"',
+    );
+    expect(sql).toContain(
       'CREATE INDEX IF NOT EXISTS tenancy_User_tenant_id_idx_44e3041c39d1 ON "public"."User" ("tenant_id");',
     );
     expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "public"."User" TO app_user;');
+  });
+
+  it('should preserve the exact TEXT tenant predicate for parser-origin models', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: parseModels(`model Account {
+  id       Int    @id
+  tenantId String @map("tenant_id")
+}`),
+    });
+    const textPredicate =
+      `"tenant_id" = current_setting('app.current_tenant', true)::text`;
+
+    expect(sql.split(textPredicate)).toHaveLength(3);
+    expect(sql).not.toContain(`"tenant_id" = NULLIF(current_setting`);
+  });
+
+  it('should generate the UUID predicate with an empty-setting guard', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: parseModels(`model Account {
+  id       Int    @id
+  tenantId String @db.Uuid @map("tenant_id")
+}`),
+    });
+    const uuidPredicate =
+      `"tenant_id" = NULLIF(current_setting('app.current_tenant', true), '')::uuid`;
+
+    expect(sql.split(uuidPredicate)).toHaveLength(3);
+    expect(sql).not.toContain(
+      `"tenant_id" = current_setting('app.current_tenant', true)::text`,
+    );
+  });
+
+  it('should add an idempotent restrictive context guard for reads and writes', () => {
+    const sql = generateSetupSql({
+      ...baseOptions,
+      models: [{ modelName: 'Account', tableName: 'accounts' }],
+    });
+    const guardPredicate =
+      `NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL`;
+
+    expect(sql).toContain(
+      'CREATE POLICY tenant_context_guard_accounts ON "public"."accounts"',
+    );
+    expect(sql).toContain(
+      "p.polname = 'tenant_context_guard_accounts'::pg_catalog.name",
+    );
+    expect(sql).toContain('  AS RESTRICTIVE');
+    expect(sql).toContain(`  USING (${guardPredicate})`);
+    expect(sql).toContain(`  WITH CHECK (${guardPredicate});`);
+    expect(sql.split(guardPredicate)).toHaveLength(3);
   });
 
   it('should preserve existing generated policies for drift review on reapply', () => {
@@ -109,6 +165,9 @@ describe('generateSetupSql', () => {
     );
     expect(sql).toContain(
       "p.polname = 'tenant_insert_user_b8b33f29d481'::pg_catalog.name",
+    );
+    expect(sql).toContain(
+      "p.polname = 'tenant_context_guard_user_ece5e1ee8731'::pg_catalog.name",
     );
     expect(sql).not.toMatch(/^DROP POLICY/m);
     expect(sql).toMatch(/existing policies.+preserved/i);
@@ -274,8 +333,12 @@ describe('generateSetupSql', () => {
     expect(sql).toContain(
       'CREATE POLICY tenant_insert_audit_logs_4aa2515f122e ON "public"."audit-logs"',
     );
+    expect(sql).toContain(
+      'CREATE POLICY tenant_context_guard_audit_logs_0773d7065a99 ON "public"."audit-logs"',
+    );
     expect(sql).not.toContain('tenant_isolation_audit-logs');
     expect(sql).not.toContain('tenant_insert_audit-logs');
+    expect(sql).not.toContain('tenant_context_guard_audit-logs');
   });
 
   it('should deterministically disambiguate generated identifiers after normalization', () => {
@@ -288,8 +351,8 @@ describe('generateSetupSql', () => {
     };
 
     const identifiers = generatedIdentifiers(generateSetupSql(options));
-    expect(identifiers).toHaveLength(6);
-    expect(new Set(identifiers).size).toBe(6);
+    expect(identifiers).toHaveLength(8);
+    expect(new Set(identifiers).size).toBe(8);
     expect(identifiers).toEqual(
       generatedIdentifiers(generateSetupSql(options)),
     );
@@ -297,15 +360,17 @@ describe('generateSetupSql', () => {
       'tenancy_audit_logs_tenant_id_idx_07148afa054f',
       'tenant_isolation_audit_logs_ae80b988a44e',
       'tenant_insert_audit_logs_4aa2515f122e',
+      'tenant_context_guard_audit_logs_0773d7065a99',
       'tenancy_audit_logs_tenant_id_idx',
       'tenant_isolation_audit_logs',
       'tenant_insert_audit_logs',
+      'tenant_context_guard_audit_logs',
     ]);
     expect(generatedIdentifiers(generateSetupSql({
       ...options,
       models: [...options.models].reverse(),
     })).sort()).toEqual([...identifiers].sort());
-    expect(identifiers.slice(3)).toEqual(generatedIdentifiers(
+    expect(identifiers.slice(4)).toEqual(generatedIdentifiers(
       generateSetupSql({
         ...options,
         models: [options.models[1]],
@@ -324,8 +389,8 @@ describe('generateSetupSql', () => {
     };
 
     const identifiers = generatedIdentifiers(generateSetupSql(options));
-    expect(identifiers).toHaveLength(6);
-    expect(new Set(identifiers).size).toBe(6);
+    expect(identifiers).toHaveLength(8);
+    expect(new Set(identifiers).size).toBe(8);
     expect(identifiers.every(
       (identifier) => Buffer.byteLength(identifier, 'utf8') <= 63,
     )).toBe(true);
@@ -343,16 +408,17 @@ describe('generateSetupSql', () => {
       ],
     }));
 
-    expect(identifiers).toHaveLength(6);
+    expect(identifiers).toHaveLength(8);
     expect(new Set(identifiers.map((identifier) => identifier.toLowerCase())).size)
-      .toBe(6);
-    expect(identifiers.slice(0, 3).every(
+      .toBe(8);
+    expect(identifiers.slice(0, 4).every(
       (identifier) => /_[0-9a-f]{12}$/.test(identifier),
     )).toBe(true);
-    expect(identifiers.slice(3)).toEqual([
+    expect(identifiers.slice(4)).toEqual([
       'tenancy_user_tenant_id_idx',
       'tenant_isolation_user',
       'tenant_insert_user',
+      'tenant_context_guard_user',
     ]);
   });
 
@@ -384,9 +450,9 @@ describe('generateSetupSql', () => {
       ],
     }));
 
-    expect(identifiers).toHaveLength(6);
+    expect(identifiers).toHaveLength(8);
     expect(new Set(identifiers.map((identifier) => identifier.toLowerCase())).size)
-      .toBe(6);
+      .toBe(8);
     expect(identifiers.every((identifier) => /_[0-9a-f]{12}$/.test(identifier)))
       .toBe(true);
   });
@@ -419,6 +485,7 @@ describe('generateSetupSql', () => {
       expect(sql).toContain('ALTER TABLE "auth"."users" FORCE ROW LEVEL SECURITY;');
       expect(sql).toContain('CREATE POLICY tenant_isolation_auth_users ON "auth"."users"');
       expect(sql).toContain('CREATE POLICY tenant_insert_auth_users ON "auth"."users"');
+      expect(sql).toContain('CREATE POLICY tenant_context_guard_auth_users ON "auth"."users"');
       expect(sql).toContain('CREATE INDEX IF NOT EXISTS tenancy_auth_users_tenant_id_idx ON "auth"."users" ("tenant_id");');
       expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "auth"."users" TO app_user;');
     });
@@ -483,6 +550,7 @@ describe('generateSetupSql', () => {
       expect(sql).toContain('-- Country (shared model)');
       expect(sql).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "reference"."countries" TO app_user;');
       expect(sql).not.toContain('ENABLE ROW LEVEL SECURITY');
+      expect(sql).not.toContain('tenant_context_guard');
     });
   });
 });
@@ -611,6 +679,17 @@ describe('generateModuleSetup', () => {
     });
     expect(result).toContain('createPrismaTenancyExtension(tenancyService, {');
     expect(result).toContain('autoInjectTenantId: true,');
+  });
+
+  it('should emit the mapped logical tenantIdField for auto-injection', () => {
+    const result = generateModuleSetup({
+      ...baseOptions,
+      autoInjectTenantId: true,
+      tenantIdField: 'tenantId',
+    });
+
+    expect(result).toContain('//     autoInjectTenantId: true,');
+    expect(result).toContain('//     tenantIdField: "tenantId",');
   });
 
   it('should include sharedModels in extension block when provided', () => {

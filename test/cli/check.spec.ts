@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { runCheck } from '../../src/cli/check';
+import { generateRelationNames } from '../../src/cli/generated-name';
+import { parseModels } from '../../src/cli/prisma-schema-parser';
 import { generateSetupSql } from '../../src/cli/templates/setup-sql';
 
 describe('runCheck', () => {
@@ -21,6 +23,29 @@ describe('runCheck', () => {
 
   function writeSql(content: string): void {
     fs.writeFileSync(path.join(tmpDir, 'tenancy-setup.sql'), content, 'utf-8');
+  }
+
+  function generateSqlForSchema(
+    schema: string,
+    sharedModels: string[] = [],
+  ): string {
+    return generateSetupSql({
+      models: parseModels(schema),
+      dbSettingKey: 'app.current_tenant',
+      sharedModels,
+      tenantIdField: 'tenant_id',
+    });
+  }
+
+  function markerlessContextGuard(
+    table: string,
+    dbSettingKey = 'app.current_tenant',
+    policyName = 'legacy_context_guard',
+  ): string {
+    const predicate =
+      `NULLIF(current_setting('${dbSettingKey}', true), '') IS NOT NULL`;
+    return `CREATE POLICY ${policyName} ON ${table} AS RESTRICTIVE ` +
+      `USING (${predicate}) WITH CHECK (${predicate});`;
   }
 
   it('should report in sync when SQL matches schema', () => {
@@ -51,6 +76,361 @@ model Post {
     expect(result.inSync).toBe(true);
     expect(result.missingPolicies).toHaveLength(0);
     expect(result.extraPolicies).toHaveLength(0);
+  });
+
+  describe('tenant column policy type contracts', () => {
+    const textPredicate =
+      `"tenant_id" = current_setting('app.current_tenant', true)::text`;
+    const uuidPredicate =
+      `"tenant_id" = NULLIF(current_setting('app.current_tenant', true), '')::uuid`;
+    const textSchema = `
+model TextAccount {
+  id String @id
+  tenant_id String
+  @@map("text_accounts")
+}
+    `;
+    const uuidSchema = `
+model UuidAccount {
+  id String @id
+  tenant_id String @db.Uuid
+  @@map("uuid_accounts")
+}
+    `;
+
+    it('accepts generated TEXT and UUID policies in one Prisma schema', () => {
+      const schema = `${textSchema}\n${uuidSchema}`;
+      const sql = generateSqlForSchema(schema);
+      writeSchema(schema);
+      writeSql(sql);
+
+      expect(sql).toContain(textPredicate);
+      expect(sql).toContain(uuidPredicate);
+      expect(runCheck({ cwd: tmpDir })).toEqual(expect.objectContaining({
+        inSync: true,
+        missingPolicies: [],
+        extraPolicies: [],
+        warnings: [],
+      }));
+    });
+
+    it('preserves the exact historical TEXT policy predicate', () => {
+      const sql = generateSqlForSchema(textSchema);
+      writeSchema(textSchema);
+      writeSql(sql);
+
+      expect(sql).toContain(`USING (${textPredicate});`);
+      expect(sql).toContain(`FOR INSERT WITH CHECK (${textPredicate});`);
+      expect(sql.split(textPredicate)).toHaveLength(3);
+      expect(sql).not.toContain('::uuid');
+      expect(runCheck({ cwd: tmpDir }).inSync).toBe(true);
+    });
+
+    it.each([
+      [
+        'omits the empty-setting NULLIF guard',
+        `"tenant_id" = current_setting('app.current_tenant', true)::uuid`,
+      ],
+      [
+        'uses a non-empty NULLIF fallback',
+        `"tenant_id" = NULLIF(current_setting('app.current_tenant', true), 'unset')::uuid`,
+      ],
+      [
+        'falls back to the historical TEXT cast',
+        textPredicate,
+      ],
+    ])('rejects a UUID policy that %s', (_label, replacement) => {
+      const generated = generateSqlForSchema(uuidSchema);
+      const drifted = generated.split(uuidPredicate).join(replacement);
+      expect(drifted).not.toBe(generated);
+      writeSchema(uuidSchema);
+      writeSql(drifted);
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(false);
+      expect(result.warnings).toEqual(expect.arrayContaining([
+        expect.stringContaining(
+          '"public"."uuid_accounts": missing or invalid tenant_isolation policy',
+        ),
+        expect.stringContaining(
+          '"public"."uuid_accounts": missing or invalid tenant_insert policy',
+        ),
+      ]));
+    });
+
+    it('detects cross-type drift between a TEXT schema and generated UUID SQL', () => {
+      const generatedForUuid = generateSqlForSchema(uuidSchema);
+      const driftedSchema = uuidSchema.replace(
+        'tenant_id String @db.Uuid',
+        'tenant_id String',
+      );
+      writeSchema(driftedSchema);
+      writeSql(generatedForUuid);
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(false);
+      expect(result.warnings).toEqual(expect.arrayContaining([
+        expect.stringContaining(
+          '"public"."uuid_accounts": missing or invalid tenant_isolation policy',
+        ),
+        expect.stringContaining(
+          '"public"."uuid_accounts": missing or invalid tenant_insert policy',
+        ),
+      ]));
+    });
+
+    it('reports an actionable warning for an unsupported tenant type', () => {
+      const schema = `
+model Account {
+  id String @id
+  tenant_id Int
+  @@map("accounts")
+}
+      `;
+      const generatedWithoutTableBlocks = generateSetupSql({
+        models: [],
+        dbSettingKey: 'app.current_tenant',
+        sharedModels: [],
+        tenantIdField: 'tenant_id',
+      });
+      writeSchema(schema);
+      writeSql(generatedWithoutTableBlocks);
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(false);
+      expect(result.missingPolicies).toContain('"accounts"');
+      expect(result.warnings).toContainEqual(expect.stringMatching(
+        /Model Account.*unsupported scalar type Int.*required Prisma String.*String @db\.Uuid/,
+      ));
+    });
+
+    it('exempts a generated shared model with no tenant field', () => {
+      const schema = `
+model Account {
+  id String @id
+  tenant_id String
+}
+
+model Country {
+  id String @id
+  code String
+}
+      `;
+      const sql = generateSqlForSchema(schema, ['Country']);
+      writeSchema(schema);
+      writeSql(sql);
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(true);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    it('recognizes a generated Unicode shared-model marker', () => {
+      const schema = `
+model 주문 {
+  id String @id
+  tenant_id String
+}
+
+model 국가 {
+  id String @id
+  code String
+}
+      `;
+      const sql = generateSqlForSchema(schema, ['국가']);
+      writeSchema(schema);
+      writeSql(sql);
+
+      expect(sql).toContain('-- 국가 (shared model)');
+      expect(runCheck({ cwd: tmpDir })).toEqual(expect.objectContaining({
+        inSync: true,
+        missingPolicies: [],
+        extraPolicies: [],
+        warnings: [],
+      }));
+    });
+  });
+
+  describe('generated restrictive context guard contract', () => {
+    const schema = `
+model Account {
+  id String @id
+  tenant_id String
+  @@map("accounts")
+}
+    `;
+    const contextGuardName = generateRelationNames({
+      tableName: 'accounts',
+      tenantIdField: 'tenant_id',
+    }).contextGuardPolicy;
+    const contextGuardPredicate =
+      `NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL`;
+
+    function contextGuardBlock(sql: string): string {
+      const createIndex = sql.indexOf(`CREATE POLICY ${contextGuardName} `);
+      if (createIndex < 0) throw new Error('Generated context guard is missing.');
+
+      const doMarkerIndex = sql.lastIndexOf('\nDO ', createIndex);
+      if (doMarkerIndex < 0) {
+        throw new Error('Generated context guard DO block is missing.');
+      }
+      const blockStart = doMarkerIndex + 1;
+      const tag = /^DO\s+(\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$)/
+        .exec(sql.slice(blockStart))?.[1];
+      if (!tag) throw new Error('Generated context guard tag is missing.');
+
+      const blockEndMarker = `\n${tag};`;
+      const blockEnd = sql.indexOf(blockEndMarker, createIndex);
+      if (blockEnd < 0) {
+        throw new Error('Generated context guard block is unterminated.');
+      }
+      return sql.slice(blockStart, blockEnd + blockEndMarker.length);
+    }
+
+    it('recognizes the exact generated restrictive context guard', () => {
+      const sql = generateSqlForSchema(schema);
+      writeSchema(schema);
+      writeSql(sql);
+
+      expect(sql).toContain(`CREATE POLICY ${contextGuardName}`);
+      expect(sql).toContain('AS RESTRICTIVE');
+      expect(sql.split(contextGuardPredicate)).toHaveLength(3);
+      expect(runCheck({ cwd: tmpDir })).toEqual(expect.objectContaining({
+        inSync: true,
+        warnings: [],
+      }));
+    });
+
+    it.each([
+      [
+        'is missing',
+        (sql: string) => sql.replace(contextGuardBlock(sql), ''),
+      ],
+      [
+        'has a wrong WITH CHECK predicate',
+        (sql: string) => sql.replace(
+          `WITH CHECK (${contextGuardPredicate});`,
+          'WITH CHECK (true);',
+        ),
+      ],
+      [
+        'uses a different generated name',
+        (sql: string) => sql
+          .split(contextGuardName)
+          .join(`${contextGuardName}_wrong`),
+      ],
+      [
+        'is permissive',
+        (sql: string) => sql.replace('AS RESTRICTIVE', 'AS PERMISSIVE'),
+      ],
+      [
+        'uses markerless-only explicit scope syntax',
+        (sql: string) => sql.replace(
+          'AS RESTRICTIVE',
+          'AS RESTRICTIVE FOR ALL TO PUBLIC',
+        ),
+      ],
+      [
+        'uses the wrong setting key',
+        (sql: string) => sql
+          .split(contextGuardPredicate)
+          .join(contextGuardPredicate.replace(
+            'app.current_tenant',
+            'app.other_tenant',
+          )),
+      ],
+      [
+        'uses a non-empty NULLIF fallback',
+        (sql: string) => sql
+          .split(contextGuardPredicate)
+          .join(contextGuardPredicate.replace("''", "'unset'")),
+      ],
+      [
+        'is duplicated',
+        (sql: string) => {
+          const block = contextGuardBlock(sql);
+          return sql.replace(block, `${block}\n${block}`);
+        },
+      ],
+    ])('rejects a canonical context guard that %s', (_label, mutate) => {
+      const generated = generateSqlForSchema(schema);
+      const drifted = mutate(generated);
+      expect(drifted).not.toBe(generated);
+      writeSchema(schema);
+      writeSql(drifted);
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(false);
+      expect(result.warnings).toContain(
+        '"public"."accounts": missing or invalid context guard policy',
+      );
+    });
+
+    it('rejects markerless legacy SQL without the context guard', () => {
+      writeSchema(schema);
+      writeSql([
+        'ALTER TABLE "accounts" ENABLE ROW LEVEL SECURITY;',
+        'ALTER TABLE "accounts" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX tenancy_accounts_tenant_id_idx ON "accounts" ("tenant_id");',
+        'CREATE POLICY tenant_isolation_accounts ON "accounts"',
+        `  USING (${`"tenant_id" = current_setting('app.current_tenant', true)::text`});`,
+        'CREATE POLICY tenant_insert_accounts ON "accounts"',
+        `  FOR INSERT WITH CHECK (${`"tenant_id" = current_setting('app.current_tenant', true)::text`});`,
+        'CREATE POLICY legacy_operator_guard ON "accounts" AS RESTRICTIVE',
+        '  USING (true) WITH CHECK (true);',
+      ].join('\n'));
+
+      const result = runCheck({ cwd: tmpDir });
+      expect(result.inSync).toBe(false);
+      expect(result.warnings).toContain(
+        '"accounts": missing or invalid context guard policy',
+      );
+    });
+
+    it('accepts a safe markerless legacy SQL context guard with a custom name', () => {
+      writeSchema(schema);
+      writeSql([
+        'ALTER TABLE "accounts" ENABLE ROW LEVEL SECURITY;',
+        'ALTER TABLE "accounts" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX tenancy_accounts_tenant_id_idx ON "accounts" ("tenant_id");',
+        'CREATE POLICY tenant_isolation_accounts ON "accounts"',
+        `  USING (${`"tenant_id" = current_setting('app.current_tenant', true)::text`});`,
+        'CREATE POLICY tenant_insert_accounts ON "accounts"',
+        `  FOR INSERT WITH CHECK (${`"tenant_id" = current_setting('app.current_tenant', true)::text`});`,
+        markerlessContextGuard(
+          '"accounts"',
+          'app.current_tenant',
+          'custom_context_guard',
+        ),
+      ].join('\n'));
+
+      expect(runCheck({ cwd: tmpDir })).toEqual(expect.objectContaining({
+        inSync: true,
+        warnings: [],
+      }));
+    });
+
+    it('accepts PostgreSQL-equivalent syntax for a safe markerless guard', () => {
+      writeSchema(schema);
+      const predicate =
+        `nullif(pg_catalog.current_setting('app.current_tenant'::text, true), ''::text) is not null`;
+      writeSql([
+        'ALTER TABLE "accounts" ENABLE ROW LEVEL SECURITY;',
+        'ALTER TABLE "accounts" FORCE ROW LEVEL SECURITY;',
+        'CREATE INDEX tenancy_accounts_tenant_id_idx ON "accounts" ("tenant_id");',
+        'CREATE POLICY tenant_isolation_accounts ON "accounts"',
+        `  USING (${`"tenant_id" = current_setting('app.current_tenant', true)::text`});`,
+        'CREATE POLICY tenant_insert_accounts ON "accounts"',
+        `  FOR INSERT WITH CHECK (${`"tenant_id" = current_setting('app.current_tenant', true)::text`});`,
+        'create policy custom_context_guard_explicit on "accounts" as restrictive',
+        `  for all to public using (${predicate}) with check (${predicate});`,
+      ].join('\n'));
+
+      expect(runCheck({ cwd: tmpDir })).toEqual(expect.objectContaining({
+        inSync: true,
+        warnings: [],
+      }));
+    });
   });
 
   it('should accept generated SQL with CRLF line endings', () => {
@@ -512,6 +892,7 @@ model User {
       "  USING (tenant_id = current_setting('app.current_tenant', true)::text);",
       "CREATE POLICY tenant_insert_User ON \"User\"",
       "  FOR INSERT WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::text);",
+      markerlessContextGuard('"User"'),
     ].join('\n'));
 
     const result = runCheck({ cwd: tmpDir });

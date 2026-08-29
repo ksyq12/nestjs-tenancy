@@ -3,11 +3,12 @@ import {
   isValidPostgresSettingKey,
   quoteSqlIdentifier,
 } from '../postgres-safety';
-import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
+import { DEFAULT_DB_SETTING_KEY, UUID_REGEX } from '../tenancy.constants';
 import {
   generateRelationNames,
   postgresCatalogIdentifier,
 } from './generated-name';
+import type { TenantColumnPolicyType } from './tenant-column';
 
 export const DOCTOR_SCHEMA_VERSION = 1 as const;
 
@@ -153,7 +154,7 @@ interface ColumnRow extends Record<string, unknown> {
   not_null: boolean;
   generated: string;
   identity: string;
-  text_compatible: boolean;
+  policy_type: TenantColumnPolicyType | null;
 }
 
 interface PrivilegeRow extends Record<string, unknown> {
@@ -263,7 +264,13 @@ SELECT
   (a.attnotnull OR t.typnotnull) AS not_null,
   a.attgenerated::text AS generated,
   a.attidentity::text AS identity,
-  COALESCE(NULLIF(t.typbasetype, 0), a.atttypid) IN (25, 1042, 1043) AS text_compatible
+  CASE COALESCE(NULLIF(t.typbasetype, 0), a.atttypid)
+    WHEN 25 THEN 'text'
+    WHEN 1042 THEN 'text'
+    WHEN 1043 THEN 'text'
+    WHEN 2950 THEN 'uuid'
+    ELSE NULL
+  END AS policy_type
 FROM pg_catalog.pg_attribute AS a
 JOIN pg_catalog.pg_type AS t ON t.oid = a.atttypid
 WHERE a.attrelid = $1::oid
@@ -454,7 +461,13 @@ async function auditDatabase(
 
   addCatalogChecks(checks, table, column, index, privileges, options);
   addReachableRoleChecks(checks, reachableRoles.rows, reachableRoles.mode, table.table_owner);
-  addPolicyChecks(checks, policies, options, session.max_identifier_length);
+  addPolicyChecks(
+    checks,
+    policies,
+    options,
+    session.max_identifier_length,
+    column?.policy_type ?? null,
+  );
 
   if (!options.active) {
     addCheck(checks, {
@@ -469,6 +482,7 @@ async function auditDatabase(
   const canProbe =
     session.current_user === options.role &&
     Boolean(column) &&
+    Boolean(column?.policy_type) &&
     Boolean(privileges?.can_select);
 
   if (!canProbe) {
@@ -481,7 +495,32 @@ async function auditDatabase(
     return;
   }
 
-  await runActiveProbes(client, options, checks);
+  if (column?.policy_type === 'uuid') {
+    const invalidOptions = [
+      UUID_REGEX.test(options.tenantA as string) ? null : '--tenant-a',
+      UUID_REGEX.test(options.tenantB as string) ? null : '--tenant-b',
+    ].filter((option): option is string => option !== null);
+    if (invalidOptions.length > 0) {
+      addCheck(checks, {
+        id: 'probe.active',
+        category: 'probe',
+        status: 'fail',
+        message: `Active probe requires dashed UUID values for a UUID tenant column; invalid option(s): ${invalidOptions.join(', ')}.`,
+        details: {
+          tenantColumnType: 'uuid',
+          invalidOptions,
+        },
+      });
+      return;
+    }
+  }
+
+  await runActiveProbes(
+    client,
+    options,
+    checks,
+    column?.policy_type as TenantColumnPolicyType,
+  );
 }
 
 function addSessionChecks(
@@ -645,10 +684,12 @@ function addCatalogChecks(
     addCheck(checks, {
       id: 'catalog.tenant_column_type',
       category: 'catalog',
-      status: column.text_compatible ? 'pass' : 'fail',
-      message: column.text_compatible
+      status: column.policy_type ? 'pass' : 'fail',
+      message: column.policy_type === 'text'
         ? `Tenant column type ${column.data_type} matches generated text policy semantics.`
-        : `Tenant column type ${column.data_type} is not compatible with the generated ::text policy contract.`,
+        : column.policy_type === 'uuid'
+          ? `Tenant column type ${column.data_type} matches generated UUID policy semantics.`
+          : `Tenant column type ${column.data_type} is not compatible with the generated TEXT/UUID policy contract.`,
     });
     addCheck(checks, {
       id: 'catalog.tenant_column_generated',
@@ -732,6 +773,7 @@ function addPolicyChecks(
   policies: PolicyRow[],
   options: ValidatedDoctorOptions,
   maxIdentifierLength: number,
+  policyType: TenantColumnPolicyType | null,
 ): void {
   const names = generateRelationNames({
     schemaName: options.schema,
@@ -746,10 +788,17 @@ function addPolicyChecks(
     names.insertPolicy,
     maxIdentifierLength,
   );
+  const contextGuardName = postgresCatalogIdentifier(
+    names.contextGuardPolicy,
+    maxIdentifierLength,
+  );
   const isolation = policies.find((policy) =>
     policy.policy_name === isolationName
   );
   const insert = policies.find((policy) => policy.policy_name === insertName);
+  const contextGuard = policies.find((policy) =>
+    policy.policy_name === contextGuardName
+  );
 
   addCheck(checks, {
     id: 'policy.isolation_exists',
@@ -768,6 +817,7 @@ function addPolicyChecks(
         isolation.using_expression,
         options.tenantColumn,
         options.dbSettingKey,
+        policyType,
       ) &&
       isolation.with_check_expression === null;
     addCheck(checks, {
@@ -799,6 +849,7 @@ function addPolicyChecks(
         insert.with_check_expression,
         options.tenantColumn,
         options.dbSettingKey,
+        policyType,
       );
     addCheck(checks, {
       id: 'policy.insert_contract',
@@ -810,6 +861,30 @@ function addPolicyChecks(
       details: policyDetails(insert),
     });
   }
+
+  const contextGuardContractMatches = contextGuard !== undefined &&
+    contextGuard.command === 'ALL' &&
+    !contextGuard.permissive &&
+    hasExactPublicRole(contextGuard.roles) &&
+    contextGuardExpressionMatchesGeneratedContract(
+      contextGuard.using_expression,
+      options.dbSettingKey,
+    ) &&
+    contextGuardExpressionMatchesGeneratedContract(
+      contextGuard.with_check_expression,
+      options.dbSettingKey,
+    );
+  addCheck(checks, {
+    id: 'policy.context_guard_contract',
+    category: 'policy',
+    status: contextGuardContractMatches ? 'pass' : 'fail',
+    message: contextGuardContractMatches
+      ? 'Context guard policy matches generated ALL/RESTRICTIVE/PUBLIC/USING/WITH CHECK contract.'
+      : contextGuard
+        ? 'Context guard policy command, mode, roles, USING, or WITH CHECK differs from generated SQL.'
+        : `Expected restrictive context guard policy ${contextGuardName} is missing.`,
+    details: contextGuard ? policyDetails(contextGuard) : undefined,
+  });
 
   const unexpectedPermissive = policies.filter((policy) => {
     const name = policy.policy_name;
@@ -832,6 +907,7 @@ async function runActiveProbes(
   client: DoctorClient,
   options: ValidatedDoctorOptions,
   checks: DoctorCheck[],
+  policyType: TenantColumnPolicyType,
 ): Promise<void> {
   const tenantA = options.tenantA as string;
   const tenantB = options.tenantB as string;
@@ -839,13 +915,13 @@ async function runActiveProbes(
   const initial = await noContextProbe(client, options, false);
   addNoContextCheck(checks, 'probe.no_context', 'Initial no-context probe', initial);
 
-  const a = await tenantProbe(client, options, tenantA, true);
+  const a = await tenantProbe(client, options, tenantA, true, policyType);
   addTenantProbeCheck(checks, 'probe.tenant_a', 'Tenant A', a);
 
   const afterCommit = await noContextProbe(client, options, false);
   addNoContextCheck(checks, 'probe.cleanup_after_commit', 'Post-COMMIT no-context probe', afterCommit);
 
-  const b = await tenantProbe(client, options, tenantB, false);
+  const b = await tenantProbe(client, options, tenantB, false, policyType);
   addTenantProbeCheck(checks, 'probe.tenant_b', 'Tenant B', b);
 
   const afterRollback = await noContextProbe(client, options, false);
@@ -875,6 +951,7 @@ async function tenantProbe(
   options: ValidatedDoctorOptions,
   tenantId: string,
   commit: boolean,
+  policyType: TenantColumnPolicyType,
 ): Promise<{ hasVisible: boolean; hasMismatch: boolean }> {
   return withReadOnlyTransaction(client, commit, async () => {
     await client.query(
@@ -883,12 +960,15 @@ async function tenantProbe(
     );
     const table = quoteQualifiedIdentifier(options.schema, options.table);
     const column = quoteSqlIdentifier(options.tenantColumn);
+    const mismatchPredicate = policyType === 'uuid'
+      ? `${column} IS DISTINCT FROM $1::uuid`
+      : `${column}::text IS DISTINCT FROM $1`;
     const result = await client.query<TenantProbeRow>(
       `SELECT
         EXISTS (SELECT 1 FROM ${table}) AS has_visible,
         EXISTS (
           SELECT 1 FROM ${table}
-          WHERE ${column}::text IS DISTINCT FROM $1
+          WHERE ${mismatchPredicate}
         ) AS has_mismatch`,
       [tenantId],
     );
@@ -994,10 +1074,19 @@ function expressionMatchesGeneratedContract(
   expression: string | null,
   tenantColumn: string,
   settingKey: string,
+  policyType: TenantColumnPolicyType | null,
+): boolean {
+  if (expression === null || policyType === null) return false;
+  const parsed = parseTenantPolicyExpression(expression, policyType);
+  return parsed?.column === tenantColumn && parsed.settingKey === settingKey;
+}
+
+function contextGuardExpressionMatchesGeneratedContract(
+  expression: string | null,
+  settingKey: string,
 ): boolean {
   if (expression === null) return false;
-  const parsed = parseTenantPolicyExpression(expression);
-  return parsed?.column === tenantColumn && parsed.settingKey === settingKey;
+  return parseContextGuardPolicyExpression(expression)?.settingKey === settingKey;
 }
 
 interface PolicyToken {
@@ -1009,53 +1098,104 @@ interface PolicyToken {
 /** Parse only the exact predicate shape emitted by generateSetupSql(). */
 function parseTenantPolicyExpression(
   expression: string,
+  policyType: TenantColumnPolicyType,
 ): { column: string; settingKey: string } | null {
   const rawTokens = tokenizePolicyExpression(expression);
   if (!rawTokens) return null;
 
-  const tokens: PolicyToken[] = [];
-  for (let index = 0; index < rawTokens.length; index += 1) {
-    const token = rawTokens[index];
-    if (token.kind === 'symbol' && (token.value === '(' || token.value === ')')) {
-      continue;
-    }
-    if (token.kind === 'symbol' && token.value === '::') {
-      const castType = rawTokens[index + 1];
-      if (!castType || castType.kind !== 'identifier' || castType.quoted || castType.value !== 'text') {
-        return null;
-      }
-      index += 1;
-      continue;
-    }
-    tokens.push(token);
+  const tokens = rawTokens.filter(
+    (token) => !(token.kind === 'symbol' && (token.value === '(' || token.value === ')')),
+  );
+  let index = 0;
+  const column = tokens[index++];
+  if (column?.kind !== 'identifier') return null;
+
+  if (policyType === 'text' && hasCast(tokens, index, 'text')) index += 2;
+  if (!isSymbol(tokens[index++], '=')) return null;
+
+  if (policyType === 'uuid') {
+    if (!isIdentifier(tokens[index++], 'nullif')) return null;
   }
 
-  const unqualified =
-    tokens.length === 6 &&
-    isIdentifier(tokens[2], 'current_setting');
-  const qualified =
-    tokens.length === 8 &&
-    isIdentifier(tokens[2], 'pg_catalog') &&
-    isSymbol(tokens[3], '.') &&
-    isIdentifier(tokens[4], 'current_setting');
-  if (!unqualified && !qualified) return null;
-
-  const functionOffset = qualified ? 2 : 0;
-  const column = tokens[0];
-  const equals = tokens[1];
-  const setting = tokens[3 + functionOffset];
-  const comma = tokens[4 + functionOffset];
-  const literalTrue = tokens[5 + functionOffset];
   if (
-    column.kind !== 'identifier' ||
-    !isSymbol(equals, '=') ||
-    setting.kind !== 'string' ||
-    !isSymbol(comma, ',') ||
-    !isIdentifier(literalTrue, 'true')
+    isIdentifier(tokens[index], 'pg_catalog') &&
+    isSymbol(tokens[index + 1], '.')
   ) {
+    index += 2;
+  }
+  if (!isIdentifier(tokens[index++], 'current_setting')) return null;
+
+  const setting = tokens[index++];
+  if (setting?.kind !== 'string') return null;
+  if (hasCast(tokens, index, 'text')) index += 2;
+  if (!isSymbol(tokens[index++], ',')) return null;
+  if (!isIdentifier(tokens[index++], 'true')) return null;
+
+  if (policyType === 'uuid') {
+    if (!isSymbol(tokens[index++], ',')) return null;
+    const emptyFallback = tokens[index++];
+    if (emptyFallback?.kind !== 'string' || emptyFallback.value !== '') {
+      return null;
+    }
+    if (hasCast(tokens, index, 'text')) index += 2;
+    if (!hasCast(tokens, index, 'uuid')) return null;
+    index += 2;
+  } else if (hasCast(tokens, index, 'text')) {
+    index += 2;
+  }
+
+  if (index !== tokens.length) return null;
+  return { column: column.value, settingKey: setting.value };
+}
+
+/** Parse only the fail-closed context predicate emitted by generateSetupSql(). */
+function parseContextGuardPolicyExpression(
+  expression: string,
+): { settingKey: string } | null {
+  const rawTokens = tokenizePolicyExpression(expression);
+  if (!rawTokens) return null;
+
+  const tokens = rawTokens.filter(
+    (token) => !(token.kind === 'symbol' && (token.value === '(' || token.value === ')')),
+  );
+  let index = 0;
+
+  if (!isIdentifier(tokens[index++], 'nullif')) return null;
+  if (
+    isIdentifier(tokens[index], 'pg_catalog') &&
+    isSymbol(tokens[index + 1], '.')
+  ) {
+    index += 2;
+  }
+  if (!isIdentifier(tokens[index++], 'current_setting')) return null;
+
+  const setting = tokens[index++];
+  if (setting?.kind !== 'string') return null;
+  if (hasCast(tokens, index, 'text')) index += 2;
+  if (!isSymbol(tokens[index++], ',')) return null;
+  if (!isIdentifier(tokens[index++], 'true')) return null;
+  if (!isSymbol(tokens[index++], ',')) return null;
+
+  const emptyFallback = tokens[index++];
+  if (emptyFallback?.kind !== 'string' || emptyFallback.value !== '') {
     return null;
   }
-  return { column: column.value, settingKey: setting.value };
+  if (hasCast(tokens, index, 'text')) index += 2;
+  if (!isIdentifier(tokens[index++], 'is')) return null;
+  if (!isIdentifier(tokens[index++], 'not')) return null;
+  if (!isIdentifier(tokens[index++], 'null')) return null;
+  if (index !== tokens.length) return null;
+
+  return { settingKey: setting.value };
+}
+
+function hasCast(
+  tokens: PolicyToken[],
+  index: number,
+  castType: TenantColumnPolicyType,
+): boolean {
+  return isSymbol(tokens[index], '::') &&
+    isIdentifier(tokens[index + 1], castType);
 }
 
 function tokenizePolicyExpression(expression: string): PolicyToken[] | null {

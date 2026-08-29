@@ -152,10 +152,34 @@ CREATE INDEX IF NOT EXISTS tenancy_users_tenant_id_idx ON users (tenant_id);
 CREATE POLICY tenant_isolation ON users
   USING (tenant_id = current_setting('app.current_tenant', true)::text);
 
+-- Keep a reset transaction-local setting from matching an empty TEXT tenant.
+-- AS RESTRICTIVE combines this guard with every permissive tenant policy.
+CREATE POLICY tenant_context_guard_users ON users
+  AS RESTRICTIVE
+  USING (NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL)
+  WITH CHECK (NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL);
+
 -- The `true` parameter means missing_ok: returns NULL instead of error when unset.
+-- The restrictive guard also treats PostgreSQL's reset empty string as no context.
 -- At the database layer, queries without tenant context return 0 rows (not an error).
 -- Repeat for each tenant-scoped table
 ```
+
+This example uses a PostgreSQL `TEXT` tenant column. For a native `UUID`
+column, keep the column side uncast so PostgreSQL can use the tenant index and
+use the generated UUID predicate:
+
+```sql
+USING (
+  tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid
+);
+```
+
+`NULLIF(..., '')` preserves fail-closed behavior after a transaction-local
+custom setting is cleaned up and PostgreSQL exposes its reset value as an empty
+string. For UUID it prevents an invalid reset-value cast; for TEXT the generated
+restrictive policy prevents that reset value from matching or inserting an
+empty tenant ID. A missing or reset setting therefore matches no row.
 
 > **Critical:** RLS is bypassed by superusers and (without `FORCE ROW LEVEL SECURITY`) by table owners. Create a dedicated application role that does **not** own the tables:
 > ```sql
@@ -243,7 +267,7 @@ The example uses the Prisma 7 `prisma-client` generator and its required Postgre
 ```typescript
 createPrismaTenancyExtension(tenancyService, {
   autoInjectTenantId: true,            // Auto-inject tenant_id on create/upsert
-  tenantIdField: 'tenant_id',          // Column name for tenant ID (default)
+  tenantIdField: 'tenant_id',          // Logical Prisma field name (default)
   sharedModels: ['Country', 'Currency'], // Models that skip RLS entirely
 })
 ```
@@ -252,7 +276,7 @@ createPrismaTenancyExtension(tenancyService, {
 |--------|------|---------|-------------|
 | `dbSettingKey` | `string` | Inherited from `TenancyService` | Optional compatibility assertion; normally omit it in module-based applications. A mismatch fails before extension creation. |
 | `autoInjectTenantId` | `boolean` | `false` | Auto-inject tenant ID into `create`, `createMany`, `createManyAndReturn`, `upsert` |
-| `tenantIdField` | `string` | `'tenant_id'` | Column name to inject tenant ID into |
+| `tenantIdField` | `string` | `'tenant_id'` | Logical Prisma field name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
 | `failClosed` | `boolean` | `true` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
 | `interactiveTransactionSupport` | `boolean` | `false` | **Deprecated.** Compatibility-only transparent mode based on Prisma internals. Use `tenancyTransaction()` for interactive transactions |
@@ -1189,6 +1213,29 @@ HTTP Request (X-Tenant-Id: 550e8400-e29b-41d4-a716-446655440000)
 
 Scaffold RLS policies and module configuration from your Prisma schema:
 
+Before running `init`, declare a required scalar field mapped to the physical
+`tenant_id` column on every tenant-scoped model. The CLI derives the policy cast
+from the Prisma field metadata, not from the interactive `tenantFormat` choice:
+
+| Prisma tenant field | Generated policy type |
+| --- | --- |
+| `String`, `String @db.Text` | `TEXT` |
+| `String @db.VarChar(n)`, `String @db.Char(n)` | `TEXT` |
+| `String @db.Uuid` | `UUID` |
+
+Field-level mapping is supported, for example
+`tenantId String @map("tenant_id") @db.Uuid`. When auto-injection is enabled,
+all non-shared models must use the same logical Prisma field name; the generated
+extension setup emits that name as `tenantIdField`. Shared models are excluded
+from tenant-field validation.
+
+The CLI does not guess from value shape: `String @db.VarChar(36)` remains a
+text policy. Missing, duplicate, nullable, list, ignored (`@ignore`), non-`String`, `Unsupported`,
+or unsupported native tenant fields such as `Citext`, `Xml`, `Inet`, `Bit`, and
+`VarBit` stop scaffolding before either output file is written. `tenantFormat`
+controls inbound ID validation only; it does not select the database storage
+type or policy cast.
+
 ```bash
 npx @nestarc/tenancy init
 ```
@@ -1218,7 +1265,9 @@ Models without `@@schema` are emitted as explicitly qualified
 to a shadow table. Inside a generated section, `tenancy check` requires the
 intact boundary markers, transaction envelope, guarded policies, and model-bound
 table/schema targets. It also flags unqualified targets; declare `@@schema` for
-every non-public model.
+every non-public model. Markerless legacy SQL remains structurally accepted,
+but it must still satisfy the current tenant-policy semantics, including the
+restrictive non-empty context guard described below.
 
 The same generated script is safe to reapply sequentially; concurrent applies
 are not part of this guarantee. Existing policies with the generated table/name
@@ -1231,6 +1280,37 @@ transaction. Do not keep that state-reversing statement in the canonical
 `tenancy-setup.sql`; `tenancy check` intentionally rejects it. Running the
 temporary copy with the fail-fast contract makes the drop and recreation atomic;
 a separate autocommitted drop can leave a policy gap if the later setup fails.
+
+Existing `TEXT` schemas keep the same canonical
+`current_setting(..., true)::text` isolation and insert predicates. Generated
+SQL now adds a separate `AS RESTRICTIVE` context-guard policy so PostgreSQL's
+reset empty string cannot match or insert a `tenant_id=''` row. The guard has a
+new deterministic name and is added automatically on a sequential reapply;
+`tenancy check` reports a missing or invalid guard in both canonical generated
+and markerless legacy SQL, and `tenancy doctor` reports a missing or drifted live
+guard. A markerless file may keep its legacy policy names, but its guard must be
+`AS RESTRICTIVE` and use
+`NULLIF(current_setting(..., true), '') IS NOT NULL` in both `USING` and
+`WITH CHECK`. If a generated policy name already exists, the drift-preservation
+rule still applies, so review and replace it through the transaction procedure
+above. For an existing deployment, preview or regenerate with `init --dry-run`,
+run `tenancy check`, apply the reviewed SQL, and finish with live `tenancy doctor`
+verification.
+
+To adopt a native UUID column, add `@db.Uuid`, preview the regenerated SQL with
+`init --dry-run`, and perform any TEXT-to-UUID column/data conversion as a
+separate reviewed Prisma/PostgreSQL migration; `init` never changes column types
+or data. Isolation/insert policy names do not include the column type, and
+sequential reapply preserves an existing same-name policy. Replace an old
+text/manual policy only through the reviewed transaction procedure above, then
+run `tenancy check` on the canonical file and `tenancy doctor --active` as the
+application role for tenant A/B, no-context, COMMIT-cleanup, and
+ROLLBACK-cleanup verification.
+
+A non-empty invalid UUID setting intentionally fails at PostgreSQL's cast rather
+than broadening visibility. Applications using UUID storage should validate
+inbound IDs as UUIDs on every transport; in particular, the 0.x RPC interceptor
+keeps its compatibility behavior unless an explicit validator is supplied.
 
 Generated index and policy names retain the legacy readable form only when the
 resolved schema, table, and (for indexes) tenant-column components are lowercase
@@ -1265,7 +1345,11 @@ npx @nestarc/tenancy check
 npx @nestarc/tenancy check --db-setting-key=custom.tenant_key
 ```
 
-Validates table coverage, tenant indexes, FORCE ROW LEVEL SECURITY, isolation/insert policies, and setting key consistency across all policies. Exits with code 0 (in sync) or 1 (drift detected).
+Validates table coverage, tenant indexes, FORCE ROW LEVEL SECURITY,
+isolation/insert policies, the restrictive context guard, and setting key
+consistency across all policies. Exits with code 0 (in sync) or 1 (drift
+detected). Markerless legacy SQL without the semantic guard returns code 1 with
+a `missing or invalid context guard policy` warning.
 
 `check` and `doctor` do not load Nest module configuration. When the canonical module key is custom, pass the same `--db-setting-key` to both commands. `init` writes that selected key to the generated SQL and the module configuration once; the generated Prisma extension inherits it from `TenancyService`.
 

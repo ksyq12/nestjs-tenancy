@@ -10,11 +10,14 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 - Raised the supported Node.js runtime contract from `>=20.19.0` to `^22.13.0 || ^24.0.0`, removed the EOL Node.js 20 CI lane, and aligned development types with Node.js 22. This pre-1.0 breaking change is planned for 0.16.0; Node.js 20 consumers must upgrade their runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked sibling-package compatibility evidence is complete.
 - Changed CLI-generated index and policy names for uppercase, punctuation, Unicode, or overlong schema/table/tenant-column inputs to use deterministic 12-hex SHA-256 suffixes within PostgreSQL's 63-byte limit. Existing lowercase ASCII short names remain unchanged, except that the old explicit-`public_` form now shares the implicit-public identity; operators with affected generated names must review and migrate the live objects before adopting the regenerated canonical SQL.
+- Changed `tenancy init` to require each non-shared model to map exactly one required scalar `String` field to the physical tenant column. Missing, duplicate, nullable, list, `@ignore`, non-String, `Unsupported`, and unknown native tenant types now stop scaffolding before generated files are written instead of falling back to an assumed text policy.
+- Changed generated RLS to add one restrictive non-empty context guard per tenant table. Valid non-empty TEXT predicates remain unchanged, while reset/no-context access to an existing empty tenant row and no-context insertion of a new one are now denied; existing deployments must regenerate or sequentially reapply the SQL, pass `tenancy check`, and verify the new guard with `tenancy doctor`. Markerless legacy SQL remains structurally supported but is now reported as drift when this semantic guard is missing or invalid.
 
 ### Added
 
 - Added the exported `TenantIdValidator` contract shared by HTTP module configuration and `TenantContextInterceptor`, with explicit sync or async validation for inbound Kafka, Bull, and gRPC tenant identifiers before context restoration and handler execution.
 - Added RPC invalid-context diagnostics through `tenant.context_invalid` and `nestarc.tenancy.invalid_context`; the interceptor does not copy the rejected ID or raw carrier data and reports only transport, operation, and optional caller-supplied stable resource metadata.
+- Added Prisma-schema-derived TEXT/UUID tenant policy generation. Required `String`, `Text`, `VarChar`, and `Char` fields preserve the existing text predicate, while `String @db.Uuid` uses `NULLIF(current_setting(..., true), '')::uuid`; mapped logical Prisma fields are carried into generated auto-injection configuration, including Unicode Prisma identifiers and datasource names.
 
 ### Changed
 
@@ -22,6 +25,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Updated CLI scaffolding to emit a custom database setting key once in module configuration while sharing the same default and validator across runtime, `init`, `check`, and `doctor`.
 - Preserved the existing non-empty RPC tenant identifier behavior when no interceptor validator is supplied during 0.x. The planned v1.0.0 default is the same UUID-like validation used by HTTP; non-UUID consumers can preserve their contract with an explicit custom validator.
 - Updated the repository Prisma 7 CLI, client, and PostgreSQL adapter baseline together from 7.9.1 to the stable 7.10.0 release while retaining the exact Prisma 6.19.3 compatibility lane.
+- Made `tenancy check` and `tenancy doctor` validate the same per-table TEXT/UUID policy contract. `check` requires a semantically exact restrictive context guard even for markerless legacy SQL, while allowing a custom legacy guard name; doctor derives and checks the exact generated live name. Doctor now distinguishes PostgreSQL text-family and UUID catalog types and uses UUID-semantic comparisons during active probes.
 
 ### Fixed
 
@@ -29,7 +33,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Wrapped CLI-generated tenancy SQL in an explicit transaction that is atomic under the documented fail-fast client contract and safe to reapply sequentially. Existing same-table/name policies are preserved for live `doctor` drift review; an operator can place an explicit drop inside a reviewed transaction when replacement is intended.
 - Qualified models without `@@schema` as `public` targets so `search_path` cannot redirect generated DDL, and made catalog guards independent of `standard_conforming_strings` for mapped identifiers.
 - Kept `tenancy check` compatible with catalog-guarded policy blocks while accepting policy evidence inside `DO` only when the entire block has the canonical guard shape, and rejecting broken markers, a missing transaction envelope, unsupported statements, unguarded policies, non-model targets, or unqualified targets in generated sections.
+- Preserved markerless legacy SQL's structural compatibility while making its tenant safety contract fail closed: a missing or malformed restrictive non-empty context guard now produces `inSync: false` and an actionable warning.
 - Made generated index and policy names source-local and collision-resistant across lossy normalization, PostgreSQL case folding, and truncation; `check` and `doctor` now derive the same exact names as `init`.
+- Prevented native UUID policies from raising an invalid-cast error after transaction-local tenant settings are cleaned up by guarding PostgreSQL's reset empty string before the UUID cast.
+- Prevented the same reset empty string from matching or inserting an empty TEXT tenant by combining the existing permissive tenant policies with an additive `AS RESTRICTIVE` context guard.
 
 ### Security
 
@@ -42,7 +49,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Added Kafka string/Buffer, gRPC metadata, and Bull data validator coverage for valid, invalid, missing, async, cancellation, context isolation, and redacted diagnostics paths.
 - Required the Prisma CLI, client, and PostgreSQL adapter to use one identical version before PgBouncer E2E starts, and moved the Prisma 7 consumer and pooler lanes to exact 7.10.0.
 - Added real PostgreSQL coverage for generated SQL double apply, preserved policy drift and explicit replacement, post-reapply active doctor isolation, rollback of earlier models after a later failure, `search_path` shadowing, and mapped identifiers with non-standard string settings.
-- Added same-schema PostgreSQL coverage for normalization and long-name collisions, including double apply, one tenant index and two policies per table, exact doctor recognition, global generated-name uniqueness, and the 63-byte bound.
+- Added same-schema PostgreSQL coverage for normalization and long-name collisions, including double apply, one tenant index and three generated policies per table, exact doctor recognition, global generated-name uniqueness, and the 63-byte bound.
+- Added real PostgreSQL TEXT/UUID coverage from `init` through canonical `check`, SQL apply, catalog/contract `doctor`, tenant A/B isolation, no-context fail-closed behavior, and COMMIT/ROLLBACK setting cleanup.
+- Added an empty TEXT tenant row and no-context insert attempt to the real PostgreSQL fixture so reset-value isolation is proved rather than inferred from non-empty tenant data.
 
 ### Documentation
 
@@ -52,6 +61,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Corrected the private vulnerability reporting path and centralized the current raw Prisma query, WebSocket, and managed-pooler guarantee boundaries.
 - Added the inbound RPC validation compatibility ADR and clarified that tenant propagation, format validation, and context restoration do not authenticate message producers or authorize access to the claimed tenant.
 - Documented the generated-name compatibility boundary and the reviewed migration required when legacy non-canonical names change to hashed identifiers.
+- Documented the supported Prisma tenant field types, the distinction between inbound `tenantFormat` and database storage, unchanged TEXT output, and the reviewed data/policy migration required when adopting UUID storage.
 
 ### Current Deprecation Inventory
 

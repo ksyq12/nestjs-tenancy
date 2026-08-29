@@ -8,6 +8,8 @@ import {
 } from '../postgres-safety';
 import { DEFAULT_DB_SETTING_KEY } from '../tenancy.constants';
 import { generateRelationNames } from './generated-name';
+import { resolveTenantColumn } from './tenant-column';
+import type { TenantColumnPolicyType } from './tenant-column';
 
 interface CheckOptions {
   cwd?: string;
@@ -625,6 +627,12 @@ export function runCheck(options?: CheckOptions): CheckResult {
       ] as const;
     }),
   );
+  const expectedModels = new Map(
+    models.map((model) => {
+      const displayName = qualifiedName(model);
+      return [canonicalTableName(displayName), model] as const;
+    }),
+  );
   const expectedTables = new Set(expectedTableNames.keys());
   const allModelTables = new Set(expectedTables);
   const expectedSchemaIdentifiers = new Set([
@@ -687,15 +695,16 @@ export function runCheck(options?: CheckOptions): CheckResult {
     }
   }
 
-  // Detect shared models
-  const sharedRegex = /-- (\w+) \(shared model\)/g;
-  const sharedModelMarkers = new Set<string>();
-  const lineCommentSql = scannedSql.lineComments
-    .map((comment) => '--' + comment.text)
-    .join('\n');
-  while ((match = sharedRegex.exec(lineCommentSql)) !== null) {
-    sharedModelMarkers.add(match[1]);
-  }
+  // Detect exact generated shared-model markers. Comparing against parsed
+  // model names avoids assuming Prisma identifiers are ASCII-only.
+  const sharedModelMarkers = new Set(
+    models
+      .filter((model) => scannedSql.lineComments.some(
+        (comment) =>
+          comment.text.trim() === `${model.modelName} (shared model)`,
+      ))
+      .map((model) => model.modelName),
+  );
 
   // A generated shared-model marker is authoritative only together with the
   // exact table grant emitted for that model. A lone comment must not hide a
@@ -809,6 +818,25 @@ export function runCheck(options?: CheckOptions): CheckResult {
     );
   }
 
+  const expectedTenantPolicyTypes = new Map<
+    string,
+    TenantColumnPolicyType
+  >();
+  for (const canonicalName of expectedTables) {
+    const expectedModel = expectedModels.get(canonicalName);
+    if (!expectedModel) continue;
+
+    try {
+      const { policyType } = resolveTenantColumn(
+        expectedModel,
+        tenantIdField,
+      );
+      expectedTenantPolicyTypes.set(canonicalName, policyType);
+    } catch (error) {
+      warnings.push(`${canonicalName}: ${(error as Error).message}`);
+    }
+  }
+
   for (const canonicalName of expectedTables) {
     if (!sqlTables.has(canonicalName)) {
       missingPolicies.push(expectedTableNames.get(canonicalName) ?? canonicalName);
@@ -827,6 +855,13 @@ export function runCheck(options?: CheckOptions): CheckResult {
     .map(({ index }) => escapeRegExp(sqlStringToken(index)));
   const expectedKeyPattern = expectedKeyTokens.length > 0
     ? '(?:' + expectedKeyTokens.join('|') + ')'
+    : '(?!)';
+  const emptyStringTokens = scannedSql.stringLiterals
+    .map((literal, index) => ({ literal, index }))
+    .filter(({ literal }) => literal.standard && literal.value === '')
+    .map(({ index }) => escapeRegExp(sqlStringToken(index)));
+  const emptyStringPattern = emptyStringTokens.length > 0
+    ? '(?:' + emptyStringTokens.join('|') + ')'
     : '(?!)';
   const recognizedPolicyStatements = new Set<string>();
 
@@ -864,8 +899,15 @@ export function runCheck(options?: CheckOptions): CheckResult {
         : '';
     const tenantColumnPattern =
       `(?:${escapedQuotedTenantField}${unquotedTenantFieldAlternative})`;
-    const tenantPredicate =
-      `${tenantColumnPattern}\\s*=\\s*current_setting\\s*\\(\\s*${expectedKeyPattern}\\s*,\\s*true\\s*\\)\\s*::\\s*text`;
+    const currentSettingPattern =
+      `current_setting\\s*\\(\\s*${expectedKeyPattern}\\s*,\\s*true\\s*\\)`;
+    let tenantPredicate = '(?!)';
+    const policyType = expectedTenantPolicyTypes.get(canonicalName);
+    if (policyType) {
+      tenantPredicate = policyType === 'uuid'
+        ? `${tenantColumnPattern}\\s*=\\s*NULLIF\\s*\\(\\s*${currentSettingPattern}\\s*,\\s*${emptyStringPattern}\\s*\\)\\s*::\\s*uuid`
+        : `${tenantColumnPattern}\\s*=\\s*${currentSettingPattern}\\s*::\\s*text`;
+    }
     const policyStatements = statementsForAnalysis;
     const expectedNames = expectedGeneratedNames.get(canonicalName);
     const isolationNamePattern = hasGeneratedBoundaries && expectedNames
@@ -902,6 +944,38 @@ export function runCheck(options?: CheckOptions): CheckResult {
     }
 
     const policyName = '(?:"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*)';
+    if (expectedNames) {
+      const markerlessTextCast =
+        `(?:\\s*::\\s*(?:pg_catalog\\.)?text)?`;
+      const guardCurrentSettingPattern = hasGeneratedBoundaries
+        ? currentSettingPattern
+        : `(?:pg_catalog\\.)?current_setting\\s*\\(\\s*${expectedKeyPattern}${markerlessTextCast}\\s*,\\s*true\\s*\\)`;
+      const guardEmptyStringPattern = hasGeneratedBoundaries
+        ? emptyStringPattern
+        : `${emptyStringPattern}${markerlessTextCast}`;
+      const contextGuardPredicate =
+        `NULLIF\\s*\\(\\s*${guardCurrentSettingPattern}\\s*,\\s*${guardEmptyStringPattern}\\s*\\)\\s+IS\\s+NOT\\s+NULL`;
+      const contextGuardNamePattern = hasGeneratedBoundaries
+        ? escapeRegExp(expectedNames.contextGuardPolicy)
+        : policyName;
+      const markerlessPolicyScope = hasGeneratedBoundaries
+        ? ''
+        : '(?:\\s+FOR\\s+ALL)?(?:\\s+TO\\s+PUBLIC)?';
+      const contextGuardRegex = new RegExp(
+        `^CREATE POLICY\\s+${contextGuardNamePattern}\\s+ON\\s+${escapedTable}\\s+AS\\s+RESTRICTIVE${markerlessPolicyScope}\\s+USING\\s*\\(\\s*${contextGuardPredicate}\\s*\\)\\s+WITH\\s+CHECK\\s*\\(\\s*${contextGuardPredicate}\\s*\\)$`,
+        hasGeneratedBoundaries ? undefined : 'i',
+      );
+      const matchingContextGuards = policyStatements.filter((statement) =>
+        contextGuardRegex.test(statement)
+      );
+      for (const statement of matchingContextGuards) {
+        recognizedPolicyStatements.add(statement);
+      }
+      if (matchingContextGuards.length !== 1) {
+        warnings.push(`${table}: missing or invalid context guard policy`);
+      }
+    }
+
     const tablePolicyRegex = new RegExp(
       `^CREATE\\s+POLICY\\s+${policyName}\\s+ON\\s+${escapedTable}(?:\\s|$)`,
       'i',
@@ -918,7 +992,7 @@ export function runCheck(options?: CheckOptions): CheckResult {
         !restrictivePolicyRegex.test(statement),
     );
     for (const statement of tablePolicyStatements) {
-      if (restrictivePolicyRegex.test(statement)) {
+      if (!hasGeneratedBoundaries && restrictivePolicyRegex.test(statement)) {
         recognizedPolicyStatements.add(statement);
       }
     }
@@ -971,7 +1045,14 @@ export function runCheck(options?: CheckOptions): CheckResult {
   const keyRegex =
     /(^|[^A-Za-z0-9_$\u0080-\uFFFF])current_setting\s*\(\s*([^,)]*)/giu;
   for (const keyMatch of functionCode.matchAll(keyRegex)) {
-    const literalIndex = sqlStringTokenIndex(keyMatch[2].trim());
+    const keyArgumentPattern = new RegExp(
+      `^(${escapeRegExp(SQL_STRING_TOKEN_PREFIX)}\\d+${escapeRegExp(SQL_STRING_TOKEN_SUFFIX)})(?:\\s*::\\s*(?:pg_catalog\\.)?text)?$`,
+      'i',
+    );
+    const keyArgumentMatch = keyArgumentPattern.exec(keyMatch[2].trim());
+    const literalIndex = keyArgumentMatch
+      ? sqlStringTokenIndex(keyArgumentMatch[1])
+      : undefined;
     const literal = literalIndex === undefined
       ? undefined
       : scannedSql.stringLiterals[literalIndex];
