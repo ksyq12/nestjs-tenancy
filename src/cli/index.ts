@@ -84,20 +84,28 @@ export function rootHelp(): string {
   ].join('\n');
 }
 
-if (require.main === module) {
-  void runCli().then((exitCode) => {
-    process.exitCode = exitCode;
-  }).catch((error: unknown) => {
-    const json = process.argv.slice(2).includes('--json');
-    if (json) {
+/** Dispatch the CLI at the process boundary and translate async failures to exit code 2. */
+export async function runCliMain(
+  argv: string[] = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+  io: CliIo = defaultIo,
+  dependencies: CliDependencies = {},
+): Promise<void> {
+  try {
+    process.exitCode = await runCli(argv, env, io, dependencies);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (argv.includes('--json')) {
       const doctor = require('./doctor') as typeof import('./doctor');
-      console.log(doctor.formatDoctorCliError(
-        error instanceof Error ? error.message : String(error),
-        true,
-      ));
+      io.log(doctor.formatDoctorCliError(message, true));
     } else {
-      console.error(error instanceof Error ? error.message : String(error));
+      io.error(message);
     }
     process.exitCode = 2;
-  });
+  }
+}
+
+/* istanbul ignore next -- executable bootstrap is covered by the packaged-bin smoke gate. */
+if (require.main === module) {
+  void runCliMain();
 }

@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 jest.mock('prompts', () => jest.fn());
@@ -6,18 +7,28 @@ jest.mock('prompts', () => jest.fn());
 import { runInit } from '../../src/cli/init';
 import { runCli } from '../../src/cli';
 
-describe('CLI init', () => {
-  const tmpDir = path.join(__dirname, 'tmp-init-test');
+type TempDirectoryTest = (tmpDir: string) => Promise<void>;
 
-  beforeEach(() => {
-    fs.mkdirSync(tmpDir, { recursive: true });
-  });
+async function withTempDirectory(test: TempDirectoryTest): Promise<void> {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tenancy-init-'));
 
-  afterEach(() => {
+  try {
+    await test(tmpDir);
+  } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+function itWithTempDirectory(name: string, test: TempDirectoryTest): void {
+  it(name, () => withTempDirectory(test));
+}
+
+describe('CLI init', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  it('should generate setup.sql with RLS policies', async () => {
+  itWithTempDirectory('should generate setup.sql with RLS policies', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n',
@@ -43,7 +54,7 @@ describe('CLI init', () => {
     expect(sql).toContain('app.current_tenant');
   });
 
-  it('should generate module setup file', async () => {
+  itWithTempDirectory('should generate module setup file', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n}\n',
@@ -66,7 +77,7 @@ describe('CLI init', () => {
     expect(content).toContain('TenancyModule.forRoot');
   });
 
-  it('should handle @@map in schema', async () => {
+  itWithTempDirectory('should handle @@map in schema', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n\n  @@map("users")\n}\n',
@@ -88,7 +99,7 @@ describe('CLI init', () => {
     expect(sql).not.toContain('"User"');
   });
 
-  it('should safely encode escaped mapped schema and table names', async () => {
+  itWithTempDirectory('should safely encode escaped mapped schema and table names', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       String.raw`model LedgerEntry {
@@ -118,7 +129,7 @@ describe('CLI init', () => {
     );
   });
 
-  it('should generate proper imports for non-Header extractor (Subdomain)', async () => {
+  itWithTempDirectory('should generate proper imports for non-Header extractor (Subdomain)', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n',
@@ -144,7 +155,7 @@ describe('CLI init', () => {
     expect(content).toContain('new SubdomainTenantExtractor()');
   });
 
-  it('should generate proper imports for JWT Claim extractor', async () => {
+  itWithTempDirectory('should generate proper imports for JWT Claim extractor', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n',
@@ -168,7 +179,7 @@ describe('CLI init', () => {
     expect(content).toContain('// import { createPrismaTenancyExtension }');
   });
 
-  it('should include a commented Prisma extension import when autoInject is true', async () => {
+  itWithTempDirectory('should include a commented Prisma extension import when autoInject is true', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n',
@@ -193,7 +204,7 @@ describe('CLI init', () => {
     expect(content).toContain("// import { createPrismaTenancyExtension } from '@nestarc/tenancy'");
   });
 
-  it('should not overwrite without confirmation', async () => {
+  itWithTempDirectory('should not overwrite without confirmation', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n}\n',
@@ -217,7 +228,7 @@ describe('CLI init', () => {
     expect(sql).toBe('existing content');
   });
 
-  it('should log "No schema.prisma found." when schema is absent', async () => {
+  itWithTempDirectory('should log "No schema.prisma found." when schema is absent', async (tmpDir) => {
     // tmpDir has no schema.prisma
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -236,7 +247,7 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should include validateTenantId in module setup when tenantFormat is Custom', async () => {
+  itWithTempDirectory('should include validateTenantId in module setup when tenantFormat is Custom', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n}\n',
@@ -260,7 +271,7 @@ describe('CLI init', () => {
     expect(content).toContain('validateTenantId: (id) => new RegExp("^[a-z0-9-]+$").test(id),');
   });
 
-  it('should reject invalid custom regex before writing generated files', async () => {
+  itWithTempDirectory('should reject invalid custom regex before writing generated files', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n}\n',
@@ -291,30 +302,32 @@ describe('CLI init', () => {
     'app.tenant\nkey',
     'app.tenant\0key',
   ])('should reject an invalid database setting key before writing files: %p', async (dbSettingKey) => {
-    fs.writeFileSync(
-      path.join(tmpDir, 'schema.prisma'),
-      'model User {\n  id Int @id\n  tenant_id String\n}\n',
-    );
+    await withTempDirectory(async (tmpDir) => {
+      fs.writeFileSync(
+        path.join(tmpDir, 'schema.prisma'),
+        'model User {\n  id Int @id\n  tenant_id String\n}\n',
+      );
 
-    const prompts = require('prompts') as jest.Mock;
-    prompts.mockResolvedValue({
-      extractor: 'Header (X-Tenant-Id)',
-      tenantFormat: 'UUID',
-      dbSettingKey,
-      autoInject: false,
-      sharedModels: '',
+      const prompts = require('prompts') as jest.Mock;
+      prompts.mockResolvedValue({
+        extractor: 'Header (X-Tenant-Id)',
+        tenantFormat: 'UUID',
+        dbSettingKey,
+        autoInject: false,
+        sharedModels: '',
+      });
+
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      await runInit({ cwd: tmpDir });
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid database setting key'));
+      expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
+      consoleSpy.mockRestore();
     });
-
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    await runInit({ cwd: tmpDir });
-
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Invalid database setting key'));
-    expect(fs.existsSync(path.join(tmpDir, 'tenancy-setup.sql'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
-    consoleSpy.mockRestore();
   });
 
-  it('should preserve existing outputs when a mapped identifier is invalid', async () => {
+  itWithTempDirectory('should preserve existing outputs when a mapped identifier is invalid', async (tmpDir) => {
     const longTableName = 't'.repeat(64);
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
@@ -350,7 +363,7 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should return early when user cancels (no extractor in response)', async () => {
+  itWithTempDirectory('should return early when user cancels (no extractor in response)', async (tmpDir) => {
     const prompts = require('prompts') as jest.Mock;
     // prompts returns an empty object (user hit Ctrl+C / cancelled)
     prompts.mockResolvedValue({});
@@ -362,7 +375,7 @@ describe('CLI init', () => {
     expect(fs.existsSync(path.join(tmpDir, 'tenancy.module-setup.ts'))).toBe(false);
   });
 
-  it('should reject an incomplete prompt response before writing files', async () => {
+  itWithTempDirectory('should reject an incomplete prompt response before writing files', async (tmpDir) => {
     const prompts = require('prompts') as jest.Mock;
     prompts.mockResolvedValue({
       extractor: 'Header (X-Tenant-Id)',
@@ -380,7 +393,7 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should return a non-zero CLI status for invalid init input', async () => {
+  itWithTempDirectory('should return a non-zero CLI status for invalid init input', async (tmpDir) => {
     const prompts = require('prompts') as jest.Mock;
     prompts.mockResolvedValue({
       extractor: 'Header (X-Tenant-Id)',
@@ -393,6 +406,7 @@ describe('CLI init', () => {
       .spyOn(console, 'error')
       .mockImplementation(() => {});
     const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(process, 'cwd').mockReturnValue(tmpDir);
 
     const exitCode = await runCli(['init']);
 
@@ -401,7 +415,7 @@ describe('CLI init', () => {
     consoleLogSpy.mockRestore();
   });
 
-  it('should reject unsupported prompt choices before writing files', async () => {
+  itWithTempDirectory('should reject unsupported prompt choices before writing files', async (tmpDir) => {
     const prompts = require('prompts') as jest.Mock;
     prompts.mockResolvedValue({
       extractor: 'Unsupported extractor',
@@ -420,7 +434,7 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should pass shared models to SQL and module setup', async () => {
+  itWithTempDirectory('should pass shared models to SQL and module setup', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n\nmodel Country {\n  id Int @id\n  name String\n}\n',
@@ -444,7 +458,7 @@ describe('CLI init', () => {
     expect(sql).toContain('ALTER TABLE "User" ENABLE ROW LEVEL SECURITY');
   });
 
-  it('should log multi-schema info when models use @@schema()', async () => {
+  itWithTempDirectory('should log multi-schema info when models use @@schema()', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n\n  @@schema("tenant")\n}\n',
@@ -468,7 +482,7 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should print output without writing files in dry-run mode', async () => {
+  itWithTempDirectory('should print output without writing files in dry-run mode', async (tmpDir) => {
     fs.writeFileSync(
       path.join(tmpDir, 'schema.prisma'),
       'model User {\n  id Int @id\n  tenant_id String\n}\n',
@@ -494,30 +508,32 @@ describe('CLI init', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should exit with error when prompts package is not available', async () => {
+  itWithTempDirectory('should exit with error when prompts package is not available', async (tmpDir) => {
     // Temporarily make require('prompts') throw
     const mockExit = jest.spyOn(process, 'exit').mockImplementation((_code?: string | number | null | undefined) => {
       throw new Error('process.exit called');
     });
     const mockError = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    // We need to reload init.ts with prompts failing.
-    // Use jest.resetModules to clear the module registry and mock prompts to throw.
-    jest.resetModules();
-    jest.doMock('prompts', () => {
-      throw new Error('Cannot find module prompts');
-    });
+    try {
+      // We need to reload init.ts with prompts failing.
+      // Use jest.resetModules to clear the module registry and mock prompts to throw.
+      jest.resetModules();
+      jest.doMock('prompts', () => {
+        throw new Error('Cannot find module prompts');
+      });
 
-    const { runInit: runInitFresh } = await import('../../src/cli/init');
+      const { runInit: runInitFresh } = await import('../../src/cli/init');
 
-    await expect(runInitFresh({ cwd: tmpDir })).rejects.toThrow('process.exit called');
-    expect(mockError).toHaveBeenCalledWith(
-      expect.stringContaining('The "prompts" package is required'),
-    );
-
-    mockExit.mockRestore();
-    mockError.mockRestore();
-    jest.resetModules();
-    jest.doMock('prompts', () => jest.fn());
+      await expect(runInitFresh({ cwd: tmpDir })).rejects.toThrow('process.exit called');
+      expect(mockError).toHaveBeenCalledWith(
+        expect.stringContaining('The "prompts" package is required'),
+      );
+    } finally {
+      mockExit.mockRestore();
+      mockError.mockRestore();
+      jest.resetModules();
+      jest.doMock('prompts', () => jest.fn());
+    }
   });
 });

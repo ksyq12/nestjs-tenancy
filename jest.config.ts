@@ -11,7 +11,11 @@ const config: Config = {
       { diagnostics: { ignoreCodes: [151002] } },
     ],
   },
-  collectCoverageFrom: ['src/**/*.ts', '!src/index.ts', '!src/**/index.ts'],
+  collectCoverageFrom: [
+    'src/**/*.ts',
+    '!src/index.ts',
+    '!src/{cache,diagnostics,events,propagation,resources,testing}/index.ts',
+  ],
   coverageDirectory: './coverage',
   coverageThreshold: {
     global: {
