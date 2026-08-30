@@ -13,7 +13,11 @@ import {
   type PrismaTenancyExtensionOptions,
   type PrismaTransactionClient,
   type PrismaTransactionContext,
+  type TenantCrossCheckFailedEvent,
+  type TenantExtractionFailedEvent,
+  type TenantNotFoundEvent,
   type TenantResolvedEvent,
+  type TenantValidationFailedEvent,
 } from '@nestarc/tenancy';
 import { loadOptionalRuntime } from './optional-runtime';
 
@@ -25,15 +29,43 @@ type CacheTrackBy = {
   ): Promise<string | undefined> | string | undefined;
 };
 
-// Deprecated declaration probes are retained until their scheduled removal
-// releases. Built-in event producers do not emit the raw request object.
+// Transparent transaction compatibility remains public through v0.16.x.
 const deprecatedExtensionOptions: PrismaTenancyExtensionOptions = {
   interactiveTransactionSupport: false,
 };
-const deprecatedResolvedEvent: TenantResolvedEvent = {
+const resolvedEvent: TenantResolvedEvent = {
   tenantId: 'tenant-compat',
-  request: { headers: { 'x-tenant-id': 'tenant-compat' } },
+  requestSummary: { method: 'GET', path: '/products' },
 };
+const removedRawRequestEvents = [
+  {
+    tenantId: 'tenant-compat',
+    // @ts-expect-error v0.16.0 declarations reject the removed raw request field.
+    request: { headers: {} },
+  } satisfies TenantResolvedEvent,
+  {
+    // @ts-expect-error v0.16.0 declarations reject the removed raw request field.
+    request: { headers: {} },
+  } satisfies TenantNotFoundEvent,
+  {
+    errorName: 'Error',
+    errorMessage: 'bad tenant header',
+    // @ts-expect-error v0.16.0 declarations reject the removed raw request field.
+    request: { headers: {} },
+  } satisfies TenantExtractionFailedEvent,
+  {
+    tenantId: 'tenant-compat',
+    // @ts-expect-error v0.16.0 declarations reject the removed raw request field.
+    request: { headers: {} },
+  } satisfies TenantValidationFailedEvent,
+  {
+    extractedTenantId: 'tenant-compat',
+    crossCheckTenantId: 'tenant-other',
+    // @ts-expect-error v0.16.0 declarations reject the removed raw request field.
+    request: { headers: {} },
+  } satisfies TenantCrossCheckFailedEvent,
+];
+void removedRawRequestEvents;
 
 function createExecutionContext(handler: () => void): ExecutionContext {
   return {
@@ -134,7 +166,7 @@ async function main(): Promise<void> {
       });
       moduleRef.get(TenancyEventService).emit(
         TenancyEvents.RESOLVED,
-        deprecatedResolvedEvent,
+        resolvedEvent,
       );
       if (!received) throw new Error('Optional event emitter did not receive the event');
     }

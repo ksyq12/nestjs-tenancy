@@ -793,12 +793,13 @@ If `@nestjs/event-emitter` is not installed, events are silently skipped — no 
 
 Built-in request-bearing event producers emit only `requestSummary` (`method`,
 `path`, `ip`, `userAgent`, and `host`) so listeners do not accidentally retain credentials,
-cookies, bodies, or framework-specific request references. The deprecated
-optional `request` type field remains through v0.15.x for source compatibility
-and is scheduled for removal in v0.16.0, but built-in middleware and guard
-producers have not included the raw request object since v0.11.0. Migrate
-listeners to the optional `event.requestSummary`; do not expect built-in
-producers to populate `event.request`. Summary fields are observability metadata,
+cookies, bodies, or framework-specific request references. v0.16.0 removes the
+deprecated optional `request` field from `TenantResolvedEvent`,
+`TenantNotFoundEvent`, `TenantExtractionFailedEvent`,
+`TenantValidationFailedEvent`, and `TenantCrossCheckFailedEvent`. Built-in
+middleware and guard producers have not included the raw request object since
+v0.11.0. Migrate listeners to the optional `event.requestSummary`; JavaScript or
+custom emitters must also stop attaching `event.request`. Summary fields are observability metadata,
 not authorization inputs, and applications should still apply their own
 redaction and retention policy to values such as path, host, IP address, and
 user agent. See
@@ -855,7 +856,10 @@ The exact schedule and migration contract are recorded in the
 | API | Added | Deprecated | Last supported | Removal target | Replacement |
 |-----|-------|------------|----------------|----------------|-------------|
 | `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | v0.16.x | v0.17.0 | `tenancyTransaction()` (public Prisma APIs) |
-| Event payload optional `request` type field | v0.4.0 | v0.11.0 | v0.15.x | v0.16.0 | `requestSummary` (v0.11.0) |
+
+The event payload optional `request` field was deprecated in v0.11.0 and
+removed in v0.16.0 after v0.15.x as its last supported line. Use
+`requestSummary`, available since v0.11.0.
 
 ## OpenTelemetry Integration
 

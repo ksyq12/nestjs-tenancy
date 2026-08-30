@@ -8,6 +8,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed (Breaking)
 
+- Removed the deprecated optional raw `request` field from the exported
+  `TenantResolvedEvent`, `TenantNotFoundEvent`, `TenantExtractionFailedEvent`,
+  `TenantValidationFailedEvent`, and `TenantCrossCheckFailedEvent` payload
+  declarations. Listeners must use the allow-listed `requestSummary`; JavaScript
+  and custom emitters must also stop attaching or consuming the raw field.
 - Raised the supported Node.js runtime contract from `>=20.19.0` to `^22.13.0 || ^24.0.0`, removed the EOL Node.js 20 CI lane, and aligned development types with Node.js 22. This pre-1.0 breaking change is planned for 0.16.0; Node.js 20 consumers must upgrade their runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked sibling-package compatibility evidence is complete.
 - Changed CLI-generated index and policy names for uppercase, punctuation, Unicode, or overlong schema/table/tenant-column inputs to use deterministic 12-hex SHA-256 suffixes within PostgreSQL's 63-byte limit. Existing lowercase ASCII short names remain unchanged, except that the old explicit-`public_` form now shares the implicit-public identity; operators with affected generated names must review and migrate the live objects before adopting the regenerated canonical SQL.
 - Changed `tenancy init` to require each non-shared model to map exactly one required scalar `String` field to the physical tenant column. Missing, duplicate, nullable, list, `@ignore`, non-String, `Unsupported`, and unknown native tenant types now stop scaffolding before generated files are written instead of falling back to an assumed text policy.
@@ -67,7 +72,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Selected v0.16.0 for removal of the deprecated event payload `request` type
   field and v0.17.0 for `interactiveTransactionSupport`, with last-supported
   versions, migrations, privacy rationale, and consumer-usage uncertainty in
-  the [deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md). TEN-M18 does not remove either API; implementation remains in TEN-B09.
+  the [deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md). TEN-B09 now implements the v0.16.0 event-field removal while preserving transparent transaction support through v0.16.x.
 - Documented the exact four-way NestJS/Prisma consumer evidence, valid optional cache/event pairings, and the separation between install/type/runtime smoke and database behavior lanes.
 - Defined the latest-minor-only security support policy for the current 0.15.x line and separated the already-published Node.js contract, the Unreleased 0.16.0 contract, and the NestJS/Prisma combinations actually exercised by CI.
 - Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, and the 0.16.0 compatibility-evidence release hold.
@@ -84,7 +89,10 @@ The exact decisions and migration contract are recorded in the
 | API | Added | Deprecated since | Last supported | Removal target | Replacement |
 |-----|-------|------------------|----------------|----------------|-------------|
 | `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | v0.16.x | v0.17.0 | `tenancyTransaction()` |
-| Event payload optional `request` type field | v0.4.0 | v0.11.0 | v0.15.x | v0.16.0 | `requestSummary` |
+
+The event payload optional `request` field was deprecated in v0.11.0 and
+removed in v0.16.0 after v0.15.x as its last supported line. Use
+`requestSummary`.
 
 ## [0.15.0] - 2026-08-24
 

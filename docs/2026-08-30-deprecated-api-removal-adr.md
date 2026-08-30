@@ -4,6 +4,14 @@
 - Status: Accepted
 - Work item: `TEN-M18`
 
+## Implementation Status
+
+The `TEN-B09` v0.16 phase removes the raw event `request` property from all five
+request-bearing exported event payload declarations and adds source and packed
+consumer negative declaration probes. `interactiveTransactionSupport` remains
+available and tested throughout v0.16.x; its v0.17 removal phase is not part of
+this change.
+
 ## Context
 
 `@nestarc/tenancy` plans to remove deprecated public APIs two minor releases

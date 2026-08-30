@@ -326,32 +326,21 @@ describe('public API barrels', () => {
       userAgent: 'jest',
       host: 'tenant.example.com',
     };
-    // Legacy consumer type compatibility only. Built-in producers emit
-    // requestSummary and have not populated request since v0.11.0.
-    const legacyEventRequest: TenancyRequest = {
-      headers: { 'x-tenant-id': 'tenant-a' },
-      path: '/projects',
-      method: 'GET',
-    };
     const resolvedEvent: TenantResolvedEvent = {
       tenantId: 'tenant-a',
       requestSummary,
-      request: legacyEventRequest,
     };
     const notFoundEvent: TenantNotFoundEvent = {
       requestSummary,
-      request: legacyEventRequest,
     };
     const extractionFailedEvent: TenantExtractionFailedEvent = {
       errorName: 'Error',
       errorMessage: 'bad tenant header',
       requestSummary,
-      request: legacyEventRequest,
     };
     const validationFailedEvent: TenantValidationFailedEvent = {
       tenantId: 'tenant-a',
       requestSummary,
-      request: legacyEventRequest,
     };
     const bypassedEvent: TenantContextBypassedEvent = {
       reason: 'withoutTenant',
@@ -362,8 +351,35 @@ describe('public API barrels', () => {
       extractedTenantId: 'tenant-a',
       crossCheckTenantId: 'tenant-b',
       requestSummary,
-      request: legacyEventRequest,
     };
+    const removedRawRequestEvents = [
+      {
+        tenantId: 'tenant-a',
+        // @ts-expect-error v0.16.0 removed the raw request event field.
+        request: { headers: {} },
+      } satisfies TenantResolvedEvent,
+      {
+        // @ts-expect-error v0.16.0 removed the raw request event field.
+        request: { headers: {} },
+      } satisfies TenantNotFoundEvent,
+      {
+        errorName: 'Error',
+        errorMessage: 'bad tenant header',
+        // @ts-expect-error v0.16.0 removed the raw request event field.
+        request: { headers: {} },
+      } satisfies TenantExtractionFailedEvent,
+      {
+        tenantId: 'tenant-a',
+        // @ts-expect-error v0.16.0 removed the raw request event field.
+        request: { headers: {} },
+      } satisfies TenantValidationFailedEvent,
+      {
+        extractedTenantId: 'tenant-a',
+        crossCheckTenantId: 'tenant-b',
+        // @ts-expect-error v0.16.0 removed the raw request event field.
+        request: { headers: {} },
+      } satisfies TenantCrossCheckFailedEvent,
+    ];
     const eventMap: TenancyEventMap = {
       [TenancyEvents.RESOLVED]: resolvedEvent,
       [TenancyEvents.NOT_FOUND]: notFoundEvent,
@@ -437,6 +453,7 @@ describe('public API barrels', () => {
       tenantIdField: 'tenant_id',
     };
 
+    expect(removedRawRequestEvents).toHaveLength(5);
     expect([
       moduleOptions,
       optionsFactory.createTenancyOptions(),
