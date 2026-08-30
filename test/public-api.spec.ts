@@ -326,21 +326,32 @@ describe('public API barrels', () => {
       userAgent: 'jest',
       host: 'tenant.example.com',
     };
+    // Legacy consumer type compatibility only. Built-in producers emit
+    // requestSummary and have not populated request since v0.11.0.
+    const legacyEventRequest: TenancyRequest = {
+      headers: { 'x-tenant-id': 'tenant-a' },
+      path: '/projects',
+      method: 'GET',
+    };
     const resolvedEvent: TenantResolvedEvent = {
       tenantId: 'tenant-a',
       requestSummary,
+      request: legacyEventRequest,
     };
     const notFoundEvent: TenantNotFoundEvent = {
       requestSummary,
+      request: legacyEventRequest,
     };
     const extractionFailedEvent: TenantExtractionFailedEvent = {
       errorName: 'Error',
       errorMessage: 'bad tenant header',
       requestSummary,
+      request: legacyEventRequest,
     };
     const validationFailedEvent: TenantValidationFailedEvent = {
       tenantId: 'tenant-a',
       requestSummary,
+      request: legacyEventRequest,
     };
     const bypassedEvent: TenantContextBypassedEvent = {
       reason: 'withoutTenant',
@@ -351,6 +362,7 @@ describe('public API barrels', () => {
       extractedTenantId: 'tenant-a',
       crossCheckTenantId: 'tenant-b',
       requestSummary,
+      request: legacyEventRequest,
     };
     const eventMap: TenancyEventMap = {
       [TenancyEvents.RESOLVED]: resolvedEvent,

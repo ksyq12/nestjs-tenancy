@@ -10,8 +10,10 @@ import {
   TenancyEvents,
   TenancyModule,
   TenancyService,
+  type PrismaTenancyExtensionOptions,
   type PrismaTransactionClient,
   type PrismaTransactionContext,
+  type TenantResolvedEvent,
 } from '@nestarc/tenancy';
 import { loadOptionalRuntime } from './optional-runtime';
 
@@ -21,6 +23,16 @@ type CacheTrackBy = {
   trackBy(
     context: ExecutionContext,
   ): Promise<string | undefined> | string | undefined;
+};
+
+// Deprecated declaration probes are retained until their scheduled removal
+// releases. Built-in event producers do not emit the raw request object.
+const deprecatedExtensionOptions: PrismaTenancyExtensionOptions = {
+  interactiveTransactionSupport: false,
+};
+const deprecatedResolvedEvent: TenantResolvedEvent = {
+  tenantId: 'tenant-compat',
+  request: { headers: { 'x-tenant-id': 'tenant-compat' } },
 };
 
 function createExecutionContext(handler: () => void): ExecutionContext {
@@ -120,16 +132,17 @@ async function main(): Promise<void> {
       emitter.once(TenancyEvents.RESOLVED, () => {
         received = true;
       });
-      moduleRef.get(TenancyEventService).emit(TenancyEvents.RESOLVED, {
-        tenantId: 'tenant-compat',
-      });
+      moduleRef.get(TenancyEventService).emit(
+        TenancyEvents.RESOLVED,
+        deprecatedResolvedEvent,
+      );
       if (!received) throw new Error('Optional event emitter did not receive the event');
     }
 
     const context = moduleRef.get(TenancyContext);
     const service = moduleRef.get(TenancyService);
     const extension = acceptPrismaExtension(
-      createPrismaTenancyExtension(service),
+      createPrismaTenancyExtension(service, deprecatedExtensionOptions),
     );
     if (typeof extension !== 'function') {
       throw new Error('Prisma extension factory did not return an extension');

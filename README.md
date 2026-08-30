@@ -237,20 +237,38 @@ Run `npx prisma generate`, then extend the generated client:
 ```typescript
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from './generated/prisma/client';
-import { TenancyService, createPrismaTenancyExtension } from '@nestarc/tenancy';
+import { PrismaClient, type Prisma } from './generated/prisma/client';
+import {
+  TenancyService,
+  createPrismaTenancyExtension,
+  tenancyTransaction,
+  type TenancyTransactionOptions,
+} from '@nestarc/tenancy';
 
 @Injectable()
 export class PrismaService implements OnModuleInit {
+  private readonly baseClient;
   public readonly client;
 
   constructor(private readonly tenancyService: TenancyService) {
     const adapter = new PrismaPg({
       connectionString: process.env.DATABASE_URL!,
     });
-    const basePrisma = new PrismaClient({ adapter });
-    this.client = basePrisma.$extends(
+    this.baseClient = new PrismaClient({ adapter });
+    this.client = this.baseClient.$extends(
       createPrismaTenancyExtension(tenancyService),
+    );
+  }
+
+  withTenantTransaction<T>(
+    callback: (tx: Prisma.TransactionClient) => Promise<T>,
+    options?: TenancyTransactionOptions,
+  ): Promise<T> {
+    return tenancyTransaction(
+      this.baseClient,
+      this.tenancyService,
+      callback,
+      options,
     );
   }
 
@@ -279,13 +297,13 @@ createPrismaTenancyExtension(tenancyService, {
 | `tenantIdField` | `string` | `'tenant_id'` | Logical Prisma field name to inject tenant ID into |
 | `sharedModels` | `string[]` | `[]` | Models that bypass RLS (no `set_config`, no injection) |
 | `failClosed` | `boolean` | `true` | Block queries when no tenant context is set (prevents accidental data exposure if RLS is misconfigured) |
-| `interactiveTransactionSupport` | `boolean` | `false` | **Deprecated.** Compatibility-only transparent mode based on Prisma internals. Use `tenancyTransaction()` for interactive transactions |
+| `interactiveTransactionSupport` | `boolean` | `false` | **Deprecated.** Compatibility-only transparent mode based on Prisma internals. Supported through v0.16.x; scheduled for removal in v0.17.0. Use `tenancyTransaction()` for interactive transactions |
 
 > **Important:** Configure a custom `dbSettingKey` once in `TenancyModule.forRoot()` or `forRootAsync()`. `createPrismaTenancyExtension()` and `tenancyTransaction()` inherit the canonical value from `TenancyService`. An explicitly repeated identical value remains accepted for compatibility, while a different value fails before extension creation or transaction start. PostgreSQL RLS `current_setting()` calls must still use the same key.
 
 > **Migration note:** Existing repeated identical values can be removed gradually. If a custom key currently exists only on the extension or helper, add it to `TenancyModule` before removing those options. Standalone consumers that construct `TenancyService` directly may continue to pass an explicit custom key. Changing the key itself also requires updating the RLS policies and passing the same `--db-setting-key` to `check` and `doctor`.
 
-> **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Use the `tenancyTransaction()` helper. The deprecated `interactiveTransactionSupport: true` mode remains only as a compatibility path for existing consumers. See [Interactive Transactions](#interactive-transactions) below.
+> **Note:** By default, the Prisma extension uses batch transactions internally, which do not propagate `set_config` into interactive transactions (`$transaction(async (tx) => ...)`). Use the `tenancyTransaction()` helper. The deprecated `interactiveTransactionSupport: true` mode remains only as a compatibility path through v0.16.x. See [Interactive Transactions](#interactive-transactions) below.
 
 > **Migration note:** If you intentionally rely on model queries without tenant context falling through to PostgreSQL RLS, set `failClosed: false` explicitly. Prefer `sharedModels`, `withoutTenant()`, or a separate admin client for intentional unscoped access.
 
@@ -298,11 +316,11 @@ The default Prisma extension wraps queries in batch transactions, which breaks i
 Uses only public Prisma APIs. The supported Prisma 6 and 7 majors are covered by the real-database PgBouncer matrix.
 
 ```typescript
-import { tenancyTransaction } from '@nestarc/tenancy';
+const tenantId = tenancyService.getCurrentTenantOrThrow();
 
-await tenancyTransaction(prisma, tenancyService, async (tx) => {
-  const user = await tx.user.findFirst();
-  await tx.order.create({ data: { userId: user.id } });
+await prismaService.withTenantTransaction(async (tx) => {
+  const user = await tx.user.findFirstOrThrow();
+  await tx.order.create({ data: { userId: user.id, tenant_id: tenantId } });
 }, {
   maxWait: 2_000,                 // Wait to start the transaction (ms)
   timeout: 5_000,                 // Maximum transaction duration (ms)
@@ -310,11 +328,25 @@ await tenancyTransaction(prisma, tenancyService, async (tx) => {
 });
 ```
 
+`withTenantTransaction()` above is a narrow application wrapper around the
+exported `tenancyTransaction()` helper. It keeps the raw client private so
+ordinary application code cannot accidentally bypass the extension.
+
 The helper forwards Prisma's public interactive transaction options (`maxWait`, `timeout`, and `isolationLevel`). It resolves the canonical database setting key and tenant before starting the transaction, applies transaction-local `set_config()` before invoking your callback, and propagates transaction-start, context-setup, callback, timeout, and database errors unchanged. A mismatched explicit key fails before `$transaction()` is called.
 
 `maxWait` enforcement belongs to the Prisma runtime. The verified Prisma 7.10.0 `PrismaPg` adapter and Prisma 6.19.3 native engine reject when their client connection pool cannot start in time. Prisma 6.19.3 `PrismaPg` accepts the option but does not enforce it under adapter-pool contention; the matrix keeps this as a negative contract. If bounded transaction admission is required on Prisma 6, use the native engine or enforce admission before calling the helper.
 
-> **Compatibility note:** `interactiveTransactionSupport: true` is deprecated because it relies on Prisma internal APIs. Existing users should keep an exact-version E2E lane while migrating to `tenancyTransaction()`.
+The wrapper passes its raw, unextended Prisma client to the helper; direct helper
+users must do the same. Use only the callback's `tx` client inside the
+transaction. Because that transaction client does not run the extension's model
+hooks, `autoInjectTenantId`, `sharedModels`, and `failClosed` do not apply there.
+Writes must provide the configured logical tenant field explicitly (as above) or
+use a reviewed database default; RLS still uses the transaction-local tenant
+setting. The helper itself remains fail-closed: it calls
+`getCurrentTenantOrThrow()` and rejects before opening `$transaction()` when
+tenant context is missing.
+
+> **Compatibility note:** `interactiveTransactionSupport: true` is deprecated because it relies on Prisma internal APIs. It remains supported through v0.16.x and is scheduled for removal in v0.17.0. Existing users should keep an exact-version E2E lane while migrating to `tenancyTransaction()`. See the [deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md) for a before/after migration and the transparent-mode differences.
 
 **Option 2: Deprecated transparent compatibility mode**
 
@@ -753,10 +785,15 @@ If `@nestjs/event-emitter` is not installed, events are silently skipped — no 
 Built-in request-bearing event producers emit only `requestSummary` (`method`,
 `path`, `ip`, `userAgent`, and `host`) so listeners do not accidentally retain credentials,
 cookies, bodies, or framework-specific request references. The deprecated
-optional `request` type field remains for source compatibility, but built-in
-middleware and guard producers have not included the raw request object since
-v0.11.0. Migrate listeners to `event.requestSummary`; do not expect built-in
-producers to populate `event.request`.
+optional `request` type field remains through v0.15.x for source compatibility
+and is scheduled for removal in v0.16.0, but built-in middleware and guard
+producers have not included the raw request object since v0.11.0. Migrate
+listeners to the optional `event.requestSummary`; do not expect built-in
+producers to populate `event.request`. Summary fields are observability metadata,
+not authorization inputs, and applications should still apply their own
+redaction and retention policy to values such as path, host, IP address, and
+user agent. See
+the [deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md) for the migration and privacy rationale.
 
 ## Tenant ID Forgery Prevention
 
@@ -803,10 +840,13 @@ TenancyModule.forRoot({
 
 Deprecated public APIs are marked with `@deprecated` JSDoc and listed in the changelog. Unless a security issue requires faster removal, deprecated APIs are planned for removal two minor versions later or at the next major release, whichever comes first.
 
-| API | Added | Deprecated | Replacement | Removal window |
-|-----|-------|------------|-------------|----------------|
-| `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | `tenancyTransaction()` (public Prisma APIs) | Eligibility begins in v0.17.0 or an earlier v1.0.0; the exact removal release is pending |
-| Event payload optional `request` type field | v0.4.0 | v0.11.0 | `requestSummary` (v0.11.0) | Eligible since v0.13.0 but retained through v0.15.x; the exact future minor or v1.0.0 removal release is pending |
+The exact schedule and migration contract are recorded in the
+[deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md).
+
+| API | Added | Deprecated | Last supported | Removal target | Replacement |
+|-----|-------|------------|----------------|----------------|-------------|
+| `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | v0.16.x | v0.17.0 | `tenancyTransaction()` (public Prisma APIs) |
+| Event payload optional `request` type field | v0.4.0 | v0.11.0 | v0.15.x | v0.16.0 | `requestSummary` (v0.11.0) |
 
 ## OpenTelemetry Integration
 

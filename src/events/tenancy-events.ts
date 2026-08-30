@@ -27,7 +27,9 @@ interface TenancyEventRequestPayload {
   requestSummary?: TenancyEventRequestSummary;
   /**
    * @deprecated Use `requestSummary` instead. Raw request objects may contain
-   * credentials, cookies, body data, and framework-specific references.
+   * credentials, cookies, body data, and framework-specific references. The
+   * compatibility type is supported through v0.15.x and scheduled for removal
+   * in v0.16.0; built-in producers no longer populate it.
    */
   request?: TenancyRequest;
 }

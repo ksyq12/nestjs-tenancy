@@ -64,7 +64,7 @@ Node.js 22.13+/24로 올리는 계약은 아직 [`Unreleased`](../CHANGELOG.md#u
 | 상태 | 방향 | 현재 결정 |
 | --- | --- | --- |
 | `보류` | `0.16.0` runtime 전환 | Node.js 22.13+/24 전환 자체는 준비됐지만 형제 패키지 compatibility evidence가 완료될 때까지 publish하지 않는다. |
-| `보류` | deprecated API 제거 | `interactiveTransactionSupport`와 legacy event field는 migration ADR과 제거 release가 정해질 때까지 호환 경로를 유지한다. |
+| `결정됨` | deprecated API 제거 | [migration ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md)에 따라 legacy event `request` 타입은 v0.16.0, `interactiveTransactionSupport`는 v0.17.0에 제거한다. 실제 제거는 TEN-B09가 담당한다. |
 | `보류` | doctor batch/구조화 | tokenizer 분리와 manifest/batch 계약을 작은 순차 작업으로 검증한 뒤 진행한다. |
 
 ## 보류·제안 — release promise 아님

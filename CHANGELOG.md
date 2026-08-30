@@ -44,6 +44,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Tests
 
+- Added source and strict packed-consumer public type probes that keep both
+  deprecated surfaces available until their scheduled removal releases across
+  the exact Prisma 6.19.3/7.10.0 compatibility matrix.
+- Preserved the existing exact Prisma 6.19.3/7.10.0 transparent-mode
+  real-database regression until `interactiveTransactionSupport` is removed.
 - Replaced the diagonal in-repository NestJS/Prisma compatibility override with isolated, strict-install packed-tarball consumers covering NestJS 10/11 × Prisma 6/7, including supported lower-bound and repository-locked optional cache/event profiles.
 - Added an isolated actual-tarball consumer smoke for the root, cache, and testing runtime/declaration exports; the cache-free root import; and the installed CLI bin, shebang, help, and invalid-invocation exit contract.
 - Added Kafka string/Buffer, gRPC metadata, and Bull data validator coverage for valid, invalid, missing, async, cancellation, context isolation, and redacted diagnostics paths.
@@ -55,6 +60,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 
+- Selected v0.16.0 for removal of the deprecated event payload `request` type
+  field and v0.17.0 for `interactiveTransactionSupport`, with last-supported
+  versions, migrations, privacy rationale, and consumer-usage uncertainty in
+  the [deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md). TEN-M18 does not remove either API; implementation remains in TEN-B09.
 - Documented the exact four-way NestJS/Prisma consumer evidence, valid optional cache/event pairings, and the separation between install/type/runtime smoke and database behavior lanes.
 - Defined the latest-minor-only security support policy for the current 0.15.x line and separated the already-published Node.js contract, the Unreleased 0.16.0 contract, and the NestJS/Prisma combinations actually exercised by CI.
 - Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, and the 0.16.0 compatibility-evidence release hold.
@@ -65,10 +74,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Current Deprecation Inventory
 
-| API | Added | Deprecated since | Replacement | Removal window |
-|-----|-------|------------------|-------------|----------------|
-| `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | `tenancyTransaction()` | Eligibility begins in v0.17.0 or an earlier v1.0.0; the exact removal release remains to be selected |
-| Event payload optional `request` type field | v0.4.0 | v0.11.0 | `requestSummary` | Eligible since v0.13.0 but retained through v0.15.x; the exact future minor or v1.0.0 removal release remains to be selected |
+The exact decisions and migration contract are recorded in the
+[deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md).
+
+| API | Added | Deprecated since | Last supported | Removal target | Replacement |
+|-----|-------|------------------|----------------|----------------|-------------|
+| `interactiveTransactionSupport` | v0.6.0 | v0.15.0 | v0.16.x | v0.17.0 | `tenancyTransaction()` |
+| Event payload optional `request` type field | v0.4.0 | v0.11.0 | v0.15.x | v0.16.0 | `requestSummary` |
 
 ## [0.15.0] - 2026-08-24
 
@@ -83,7 +95,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Added `maxWait` forwarding to `tenancyTransaction()` and expanded its transaction failure and isolation-level contracts.
-- Deprecated transparent `interactiveTransactionSupport`, introduced in v0.6.0, in favor of the explicit `tenancyTransaction()` API. Removal eligibility begins in v0.17.0 or an earlier v1.0.0; the exact removal release is pending.
+- Deprecated transparent `interactiveTransactionSupport`, introduced in v0.6.0, in favor of the explicit `tenancyTransaction()` API. At publication, removal eligibility began in v0.17.0 or an earlier v1.0.0 and the exact release was pending; TEN-M18 later selected v0.17.0.
 - Updated the ecosystem compatibility baseline to the published `@nestarc/api-keys@0.3.1` and `@nestarc/jobs@0.3.1` packages.
 
 ## [0.14.0] - 2026-08-02

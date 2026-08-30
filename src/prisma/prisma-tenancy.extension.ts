@@ -61,7 +61,8 @@ export interface PrismaTenancyExtensionOptions {
    * For an alternative that uses only public Prisma APIs, see `tenancyTransaction()`.
    *
    * @deprecated Use `tenancyTransaction()` for interactive transactions. This
-   * compatibility-sensitive mode is retained only for existing consumers.
+   * compatibility-sensitive mode is supported through v0.16.x and scheduled
+   * for removal in v0.17.0.
    * @default false
    */
   interactiveTransactionSupport?: boolean;
