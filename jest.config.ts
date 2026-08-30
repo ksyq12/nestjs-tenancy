@@ -28,6 +28,13 @@ const broadCriticalCoverage = {
   statements: 95,
 };
 
+const aggregateCoverage = {
+  branches: 95,
+  functions: 100,
+  lines: 98,
+  statements: 98,
+};
+
 const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: '.',
@@ -46,12 +53,7 @@ const config: Config = {
   ],
   coverageDirectory: './coverage',
   coverageThreshold: {
-    global: {
-      branches: 95,
-      functions: 100,
-      lines: 98,
-      statements: 98,
-    },
+    global: aggregateCoverage,
     './src/cli/check.ts': broadCriticalCoverage,
     './src/cli/index.ts': completeCriticalCoverage,
     './src/cli/init.ts': broadCriticalCoverage,

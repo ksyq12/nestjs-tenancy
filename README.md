@@ -75,13 +75,13 @@ Measured extension overhead: **-0.003ms avg (-0.1%)**, **-0.166ms p95** compared
 ## Support and Compatibility
 
 `@nestarc/tenancy` is pre-1.0. Security fixes are provided for the latest
-published minor release line only; `0.15.x` is the current supported line. See
+published minor release line only; `0.16.x` is the current supported line. See
 the [security policy](./SECURITY.md) for reporting and response targets.
 
 Package compatibility ranges and repository verification are related, but
 they are not the same claim:
 
-| Area | Unreleased contract in this source tree | Current repository evidence |
+| Area | v0.16.0 contract | Current repository evidence |
 |------|--------------------|----------------------------------------|
 | Node.js | `^22.13.0 \|\| ^24.0.0` | Lint, unit/coverage, and build run on exact 22.13.0, the current Node 22 release, and the current Node 24 release. Database and infrastructure jobs run on current Node 22; publishing runs on current Node 24. |
 | NestJS | Peer range `^10.0.0 \|\| ^11.0.0` | A strict, isolated packed-tarball consumer matrix covers exact NestJS 10.4.22 and 11.2.1 across both supported Prisma majors on current Node 22. The locked primary graph uses NestJS 11.2.1; separate fully published ecosystem lanes preserve exact NestJS 10.4.20 for the legacy graph and use exact 11.2.1 for the modern graph. |
@@ -106,15 +106,13 @@ ranges. Each run intentionally resolves a fresh transitive graph so CI detects
 upstream install drift; it is not a byte-for-byte frozen dependency snapshot.
 Prisma data-path behavior remains the responsibility of the direct
 PostgreSQL and Prisma 6/7 PgBouncer lanes rather than being duplicated in every
-install-only consumer lane. Already-published 0.15.x artifacts retain their
-Node.js `>=20.19.0`
-metadata, but Node.js 20 is [upstream EOL](https://nodejs.org/en/about/previous-releases)
-and is no longer supported by this source tree. The Node floor change is a
-breaking pre-1.0 change planned for 0.16.0; Node 20 consumers must upgrade their
-runtime or remain on 0.15.x. The tracked sibling-package compatibility
-prerequisite for 0.16.0 is complete. Publishing 0.16.0 is a separate release
-action; passing the compatibility gates does not publish it. Node 26 support is
-not yet declared and requires separate validation.
+install-only consumer lane. The supported 0.16.x line declares Node.js
+`^22.13.0 || ^24.0.0`. Older 0.15.x artifacts retain their published
+Node.js `>=20.19.0` metadata, but Node.js 20 is
+[upstream EOL](https://nodejs.org/en/about/previous-releases) and is not
+supported by 0.16.x. Node 20 consumers must upgrade their runtime or remain on
+the unsupported 0.15.x line. Node 26 support is not yet declared and requires
+separate validation.
 
 The Nestarc ecosystem gates are artifact-explicit and independent:
 

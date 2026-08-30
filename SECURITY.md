@@ -9,17 +9,15 @@ supported line.
 
 | Package release line  | Security fixes     |
 |-----------------------|--------------------|
-| 0.15.x                | ✅                 |
-| 0.14.x and earlier    | ❌ Upgrade to 0.15.x |
+| 0.16.x                | ✅                 |
+| 0.15.x and earlier    | ❌ Upgrade to 0.16.x |
 
 Package security support and upstream runtime maintenance are separate.
-Already-published 0.15.x artifacts declare Node.js >= 20.19.0, but Node.js 20
-is upstream EOL and security fixes for the package do not restore upstream
-runtime support. The Unreleased source planned for 0.16.0 declares
-`^22.13.0 || ^24.0.0`; CI and release source gates cover exact Node.js 22.13.0,
-the current Node.js 22 release, and the current Node.js 24 release. Publishing
-0.16.0 remains on hold until the tracked sibling-package compatibility evidence
-is complete. Node.js 26 support is not declared. See the README's
+The supported 0.16.x line declares `^22.13.0 || ^24.0.0`; CI and release source
+gates cover exact Node.js 22.13.0, the current Node.js 22 release, and the
+current Node.js 24 release. Older 0.15.x artifacts retain their published
+Node.js >= 20.19.0 metadata, but Node.js 20 is upstream EOL and is not supported
+by 0.16.x. Node.js 26 support is not declared. See the README's
 [support and compatibility](./README.md#support-and-compatibility) section for
 the declared NestJS and Prisma ranges, the exact strict-consumer combinations,
 and the separate database behavior lanes exercised by CI.

@@ -59,6 +59,43 @@ describe('doctor module boundaries', () => {
     }
   });
 
+  it('fails closed for malformed tenant and context-guard token shapes', () => {
+    for (const expression of [
+      "'tenant_id' = current_setting('app.current_tenant', true)",
+      'tenant_id = current_setting(true, true)',
+      "tenant_id = current_setting('app.current_tenant' true)",
+    ]) {
+      expect(expressionMatchesGeneratedContract(
+        expression,
+        'tenant_id',
+        'app.current_tenant',
+        'text',
+      )).toBe(false);
+    }
+    expect(expressionMatchesGeneratedContract(
+      "tenant_id = NULLIF(current_setting('app.current_tenant', true) '')::uuid",
+      'tenant_id',
+      'app.current_tenant',
+      'uuid',
+    )).toBe(false);
+
+    for (const expression of [
+      "NULLIF(current_setting(true, true), '') IS NOT NULL",
+      "NULLIF(current_setting('app.current_tenant' true), '') IS NOT NULL",
+      "NULLIF(current_setting('app.current_tenant', false), '') IS NOT NULL",
+      "NULLIF(current_setting('app.current_tenant', true) '') IS NOT NULL",
+      "NULLIF(current_setting('app.current_tenant', true), '') = NOT NULL",
+      "NULLIF(current_setting('app.current_tenant', true), '') IS false NULL",
+      "NULLIF(current_setting('app.current_tenant', true), '') IS NOT false",
+      "NULLIF(current_setting('app.current_tenant', true), '') IS NOT NULL true",
+    ]) {
+      expect(contextGuardExpressionMatchesGeneratedContract(
+        expression,
+        'app.current_tenant',
+      )).toBe(false);
+    }
+  });
+
   it('preserves the result, JSON, text, and exit-code golden contract', () => {
     const result = doctorChecksResult({
       schema: 'public',
