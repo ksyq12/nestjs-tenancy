@@ -198,7 +198,7 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run test:e2e:ecosystem
+      - run: npm run test:e2e:ecosystem:published-only
         env:
           ECOSYSTEM_SKIP_DOCKER: '1'
           DATABASE_URL: postgresql://tenancy:tenancy@127.0.0.1:5433/tenancy_test

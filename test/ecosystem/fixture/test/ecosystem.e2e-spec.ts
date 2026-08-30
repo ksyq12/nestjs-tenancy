@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import path from 'node:path';
@@ -157,8 +158,17 @@ describe('installed Nestarc ecosystem compatibility fixture', () => {
   });
 
   it('loads every package from the isolated installed artifact graph', () => {
+    const mode = process.env.ECOSYSTEM_MODE;
+    expect(mode).toMatch(/^(published-only|local-artifact)$/);
+    const fixtureManifest = JSON.parse(
+      readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'),
+    );
+    const fixtureLock = JSON.parse(
+      readFileSync(path.join(process.cwd(), 'package-lock.json'), 'utf8'),
+    );
     const expected = {
-      '@nestarc/tenancy': '0.15.0',
+      '@nestarc/tenancy':
+        process.env.TENANCY_CANDIDATE_VERSION ?? '0.15.0',
       '@nestarc/api-keys': '0.3.1',
       '@nestarc/rbac': '0.2.0',
       '@nestarc/jobs': '0.3.1',
@@ -167,13 +177,33 @@ describe('installed Nestarc ecosystem compatibility fixture', () => {
     };
 
     for (const [packageName, version] of Object.entries(expected)) {
+      const requested = fixtureManifest.dependencies[packageName];
+      const lockEntry =
+        fixtureLock.packages[`node_modules/${packageName}`];
+      const isCandidate =
+        mode === 'local-artifact' && packageName === '@nestarc/tenancy';
       const entry = require.resolve(packageName);
       const manifest = require(path.join(
         entry.slice(0, entry.lastIndexOf(`${path.sep}dist${path.sep}`)),
         'package.json',
       ));
+      expect(manifest.name).toBe(packageName);
       expect(manifest.version).toBe(version);
       expect(entry).toContain(`${path.sep}node_modules${path.sep}`);
+      expect(lockEntry.version).toBe(version);
+      expect(lockEntry.integrity).toMatch(/^sha512-/);
+      if (isCandidate) {
+        expect(requested).toMatch(/^file:/);
+        expect(lockEntry.resolved).toMatch(/^file:/);
+        expect(lockEntry.integrity).toBe(
+          process.env.TENANCY_CANDIDATE_INTEGRITY,
+        );
+      } else {
+        expect(requested).toBe(version);
+        expect(lockEntry.resolved).toMatch(
+          /^https:\/\/registry\.npmjs\.org\//,
+        );
+      }
     }
   });
 

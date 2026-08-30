@@ -1,7 +1,7 @@
 # `@nestarc/tenancy` Roadmap
 
 > 기준선: published `v0.15.0` (2026-08-24)<br>
-> 최종 갱신: 2026-08-29 (Asia/Seoul)
+> 최종 갱신: 2026-08-30 (Asia/Seoul)
 
 이 문서는 제품 방향과 이미 제공되는 기능을 요약한다. 현재 작업의 순서, 담당 상태, 완료 조건은
 [`2026-08-28-v0.15.0-maintenance-work-plan.md`](./2026-08-28-v0.15.0-maintenance-work-plan.md)를
@@ -55,7 +55,7 @@ Node.js 22.13+/24로 올리는 계약은 아직 [`Unreleased`](../CHANGELOG.md#u
 | live DB doctor | catalog/role/policy/index 검사와 opt-in active isolation probe를 실제 PostgreSQL에서 검증한다. 현재 invocation당 한 table을 감사한다. |
 | transaction mode PgBouncer | PostgreSQL 16과 self-hosted PgBouncer transaction mode에서 Prisma 6/7의 backend 재사용·교체·동시성·commit·rollback·timeout·cleanup을 CI/release gate로 검증한다. managed/custom pooler 전체에 대한 일반 보증은 아니다. |
 | package compatibility | Unreleased maintenance gate에서 NestJS 10/11 × Prisma 6/7 네 strict tarball consumer 조합과 root/cache/testing/bin package shape를 검증한다. |
-| Nestarc ecosystem | API Keys → tenancy → RBAC → RLS/outbox → jobs → webhook 흐름을 strict tarball install E2E로 검증한다. |
+| Nestarc ecosystem | API Keys → tenancy → RBAC → RLS/outbox → jobs → webhook 흐름을 검증한다. CI/release의 published-only tuple은 커밋된 lock과 registry source/integrity assertion을 사용하고, 미공개 tenancy candidate는 published sibling을 유지하는 명시적 local-artifact lane으로 분리한다. |
 
 ## 현재 유지보수 방향
 

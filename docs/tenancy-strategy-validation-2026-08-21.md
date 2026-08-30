@@ -316,6 +316,12 @@ startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__interna
 
 ### 4.3 Cross-package integration kit: P2 strict install 포함 완료
 
+> [!NOTE]
+> 아래 자동 sibling 탐색 설명은 2026-08-23 당시 구현의 역사적 기록이다.
+> TEN-M19에서 이 ambient 동작을 제거하고 committed lock 기반
+> `published-only`와 명시적 tenancy tarball `local-artifact` 모드로 대체했다.
+> 현재 실행 계약은 [`test/ecosystem/fixture/README.md`](../test/ecosystem/fixture/README.md)를 따른다.
+
 `@nestarc/tenancy/testing`의 기존 단일 패키지 helper 세 개는 그대로 유지한다.
 
 - `TestTenancyModule`
@@ -324,14 +330,14 @@ startup에서는 `_createItxClient` 존재만 확인한다. Prisma가 `__interna
 
 ecosystem 패키지를 `tenancy` runtime dependency로 추가하지 않았다. 대신 [`test/ecosystem/fixture`](../test/ecosystem/fixture/)를 자체 `package.json`, TypeScript/Jest/Prisma 설정을 가진 독립 consumer application으로 두었다.
 
-대표 명령 [`npm run test:e2e:ecosystem`](../package.json)은 다음 순서로 실행된다.
+2026-08-23 당시 대표 명령 [`npm run test:e2e:ecosystem`](../package.json)은 다음 순서로 실행됐다.
 
-1. 현재 `dist`에서 `@nestarc/tenancy` tarball을 만든다.
-2. 로컬 형제 Nestarc 저장소와 빌드 산출물이 있으면 해당 package도 tarball로 만든다.
-3. 형제 저장소가 없는 CI에서는 fixture에 고정된 published version을 사용한다.
-4. fixture 전체를 임시 디렉터리로 복사하고 package spec을 tarball absolute path로 교체한다.
-5. 독립 `node_modules`를 설치하고 Prisma 6 client를 생성한다.
-6. PostgreSQL schema/RLS fixture, Nest application, 실제 HTTP webhook receiver를 실행한다.
+1. 현재 `dist`에서 `@nestarc/tenancy` tarball을 만들었다.
+2. 로컬 형제 Nestarc 저장소와 빌드 산출물이 있으면 해당 package도 tarball로 만들었다.
+3. 형제 저장소가 없는 CI에서는 fixture에 고정된 published version을 사용했다.
+4. fixture 전체를 임시 디렉터리로 복사하고 package spec을 tarball absolute path로 교체했다.
+5. 독립 `node_modules`를 설치하고 Prisma 6 client를 생성했다.
+6. PostgreSQL schema/RLS fixture, Nest application, 실제 HTTP webhook receiver를 실행했다.
 
 ```text
 api-keys → tenancy ALS → rbac → Prisma/RLS + outbox → jobs → webhook HTTP

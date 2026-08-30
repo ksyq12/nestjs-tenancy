@@ -92,7 +92,10 @@ const GATE_RUN_COMMANDS = {
     'npm ci',
     'npx jest --config test/e2e/redis/jest.redis.config.ts --runInBand',
   ],
-  'ecosystem-e2e': ['npm ci', 'npm run test:e2e:ecosystem'],
+  'ecosystem-e2e': [
+    'npm ci',
+    'npm run test:e2e:ecosystem:published-only',
+  ],
 } as const;
 
 const GATE_ACTIONS = {
@@ -355,6 +358,20 @@ describe('shared validation workflow', () => {
       expect(readNeeds(job)).toEqual([]);
       expectRequiredJob(job);
     }
+  });
+
+  it('uses the explicit published-only ecosystem baseline in CI and release', () => {
+    const ecosystem = readJobBlock(ciWorkflow, 'ecosystem-e2e');
+
+    expect(readRunCommands(ecosystem)).toContain(
+      'npm run test:e2e:ecosystem:published-only',
+    );
+    expect(packageManifest.scripts['test:e2e:ecosystem:published-only']).toBe(
+      'node scripts/test-ecosystem-e2e.js --mode published-only',
+    );
+    expect(packageManifest.scripts['test:e2e:ecosystem']).toBe(
+      'npm run test:e2e:ecosystem:published-only',
+    );
   });
 
   it('cancels only superseded pull request runs', () => {

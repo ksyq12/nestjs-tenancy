@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "test": "jest --runInBand",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:packages": "node scripts/verify-packages.cjs && npm ls @nestarc/tenancy @nestarc/api-keys @nestarc/rbac @nestarc/jobs @nestarc/outbox @nestarc/webhook --all"
   },
   "dependencies": {
     "@nestarc/api-keys": "0.3.1",

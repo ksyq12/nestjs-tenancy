@@ -44,6 +44,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Tests
 
+- Split the Nestarc ecosystem runner into explicit `published-only` and
+  tenancy `local-artifact` modes, removed ambient sibling discovery, committed
+  the fixture lockfile, and added strict installed name/version/source/SHA-512
+  assertions while preserving the NestJS 10 + Prisma 6 full flow.
 - Added source and strict packed-consumer public type probes that keep both
   deprecated surfaces available until their scheduled removal releases across
   the exact Prisma 6.19.3/7.10.0 compatibility matrix.

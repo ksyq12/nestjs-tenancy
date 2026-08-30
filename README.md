@@ -115,6 +115,15 @@ runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked
 sibling-package compatibility evidence is complete. Node 26 support is not yet
 declared and requires separate validation.
 
+The Nestarc ecosystem gate is also artifact-explicit. Hosted CI and release
+validation run the committed `published-only` lock for tenancy, API Keys, RBAC,
+Jobs, Outbox, and Webhook. An unpublished tenancy tarball is tested separately
+with `npm run test:e2e:ecosystem:local-artifact -- --tenancy-tarball <absolute.tgz>`;
+only tenancy is replaced, while the five sibling packages remain registry-locked. The
+runner records and asserts each installed package's name, version, source, and
+integrity, and never discovers adjacent repositories automatically. See the
+[fixture contract](./test/ecosystem/fixture/README.md) for exact commands.
+
 The automatic tenant-isolation guarantee does not currently cover:
 
 - Raw Prisma operations (`$queryRaw` / `$executeRaw`), which bypass the model extension.
