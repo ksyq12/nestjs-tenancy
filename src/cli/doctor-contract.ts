@@ -44,7 +44,14 @@ export interface DoctorSummary {
 }
 
 export interface DoctorError {
-  code: 'INVALID_OPTIONS' | 'DRIVER_UNAVAILABLE' | 'CONNECTION_FAILED' | 'QUERY_FAILED';
+  code:
+    | 'INVALID_OPTIONS'
+    | 'INVALID_MANIFEST'
+    | 'DRIVER_UNAVAILABLE'
+    | 'CONNECTION_FAILED'
+    | 'QUERY_FAILED'
+    | 'ABORTED'
+    | 'TIMEOUT';
   message: string;
 }
 
@@ -88,6 +95,12 @@ export interface DoctorClient {
 
 export interface DoctorDependencies {
   clientFactory?: (url: string) => DoctorClient;
+  /** Cooperative batch cancellation, checked between catalog queries and probe transactions. */
+  signal?: AbortSignal;
+  /** Error classification used when signal is aborted. */
+  abortCode?: Extract<DoctorError['code'], 'ABORTED' | 'TIMEOUT'>;
+  /** Session-level bound for catalog and probe SQL in batch mode. */
+  statementTimeoutMs?: number;
 }
 
 export interface DoctorCliOptions extends DoctorOptions {
@@ -95,8 +108,18 @@ export interface DoctorCliOptions extends DoctorOptions {
   json: boolean;
 }
 
+export interface DoctorBatchCliOptions {
+  url: string;
+  manifestPath: string;
+  active: boolean;
+  concurrency: number;
+  timeoutMs: number;
+  json: boolean;
+}
+
 export type DoctorCliParseResult =
   | { kind: 'options'; options: DoctorCliOptions }
+  | { kind: 'batch-options'; options: DoctorBatchCliOptions }
   | { kind: 'help' }
   | { kind: 'error'; message: string; json: boolean };
 
@@ -248,16 +271,20 @@ export function parseDoctorArgs(
 
   const json = args.includes('--json');
   const booleans = new Set(['--json', '--active']);
-  const valueFlags = new Map<string, keyof DoctorCliOptions>([
+  type DoctorCliValueKey = keyof DoctorCliOptions | 'manifestPath' | 'concurrency' | 'timeoutMs';
+  const valueFlags = new Map<string, DoctorCliValueKey>([
     ['--url', 'url'],
     ['--table', 'table'],
+    ['--manifest', 'manifestPath'],
     ['--role', 'role'],
     ['--db-setting-key', 'dbSettingKey'],
     ['--tenant-column', 'tenantColumn'],
     ['--tenant-a', 'tenantA'],
     ['--tenant-b', 'tenantB'],
+    ['--concurrency', 'concurrency'],
+    ['--timeout-ms', 'timeoutMs'],
   ]);
-  const values = new Map<keyof DoctorCliOptions, string>();
+  const values = new Map<DoctorCliValueKey, string>();
   const seenBooleans = new Set<string>();
 
   for (let index = 0; index < args.length; index += 1) {
@@ -301,10 +328,45 @@ export function parseDoctorArgs(
 
   const url = values.get('url') ?? env.DATABASE_URL;
   const table = values.get('table');
+  const manifestPath = values.get('manifestPath');
   const role = values.get('role');
   if (!url) return { kind: 'error', message: 'Set DATABASE_URL or pass --url.', json };
+  if (table && manifestPath) {
+    return { kind: 'error', message: '--table and --manifest are mutually exclusive.', json };
+  }
+  if (manifestPath) {
+    for (const [key, flag] of [
+      ['role', '--role'],
+      ['dbSettingKey', '--db-setting-key'],
+      ['tenantColumn', '--tenant-column'],
+      ['tenantA', '--tenant-a'],
+      ['tenantB', '--tenant-b'],
+    ] as const) {
+      if (values.has(key)) {
+        return { kind: 'error', message: `${flag} must be declared in the manifest in batch mode.`, json };
+      }
+    }
+    const concurrency = parseBoundedInteger(values.get('concurrency'), '--concurrency', 4, 1, 16);
+    if (typeof concurrency === 'string') return { kind: 'error', message: concurrency, json };
+    const timeoutMs = parseBoundedInteger(values.get('timeoutMs'), '--timeout-ms', 60_000, 1, 600_000);
+    if (typeof timeoutMs === 'string') return { kind: 'error', message: timeoutMs, json };
+    return {
+      kind: 'batch-options',
+      options: {
+        url,
+        manifestPath,
+        active: seenBooleans.has('--active'),
+        concurrency,
+        timeoutMs,
+        json: seenBooleans.has('--json'),
+      },
+    };
+  }
   if (!table) return { kind: 'error', message: 'Missing required option: --table=schema.table', json };
   if (!role) return { kind: 'error', message: 'Missing required option: --role=<application-role>', json };
+  if (values.has('concurrency') || values.has('timeoutMs')) {
+    return { kind: 'error', message: '--concurrency and --timeout-ms are only valid with --manifest.', json };
+  }
 
   const active = seenBooleans.has('--active');
   const tenantA = values.get('tenantA');
@@ -333,6 +395,21 @@ export function parseDoctorArgs(
       json: seenBooleans.has('--json'),
     },
   };
+}
+
+function parseBoundedInteger(
+  value: string | undefined,
+  flag: string,
+  defaultValue: number,
+  minimum: number,
+  maximum: number,
+): number | string {
+  if (value === undefined) return defaultValue;
+  if (!/^\d+$/.test(value)) return `${flag} must be an integer from ${minimum} to ${maximum}.`;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : `${flag} must be an integer from ${minimum} to ${maximum}.`;
 }
 
 export function formatDoctorResult(result: DoctorResult, json: boolean): string {
@@ -377,7 +454,7 @@ export function formatDoctorCliError(message: string, json: boolean): string {
 
 export function doctorHelp(): string {
   return [
-    'Usage: npx @nestarc/tenancy doctor --table=<schema.table> --role=<role> [options]',
+    'Usage: npx @nestarc/tenancy doctor (--table=<schema.table> --role=<role> | --manifest=<path>) [options]',
     '',
     'Connection:',
     '  --url=<postgresql-url>              Runtime application-role URL (or DATABASE_URL)',
@@ -387,9 +464,12 @@ export function doctorHelp(): string {
     '  --role=<role>                       Expected current_user application role (required)',
     `  --db-setting-key=<key>              Tenant setting key (default: ${DEFAULT_DB_SETTING_KEY})`,
     `  --tenant-column=<column>            Tenant column (default: ${DEFAULT_TENANT_COLUMN})`,
+    '  --manifest=<path>                   Versioned JSON table inventory (batch mode)',
+    '  --concurrency=<1..16>               Batch worker limit (default: 4)',
+    '  --timeout-ms=<1..600000>            Batch admission deadline (default: 60000)',
     '',
     'Active read-only probe:',
-    '  --active                            Run no-context and tenant A/B isolation probes',
+    '  --active                            Explicitly run no-context and tenant A/B probes',
     '  --tenant-a=<id>                     Existing tenant A ID (required with --active)',
     '  --tenant-b=<id>                     Existing tenant B ID (required with --active)',
     '',

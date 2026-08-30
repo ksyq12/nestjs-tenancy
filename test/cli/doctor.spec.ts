@@ -245,6 +245,44 @@ describe('runDoctor', () => {
     );
   });
 
+  it('sets the batch session statement timeout before catalog queries', async () => {
+    const mock = createClient(healthyState());
+
+    const result = await runDoctor(baseOptions(), {
+      clientFactory: () => mock.client,
+      statementTimeoutMs: 5000,
+    });
+
+    expect(result.status).toBe('healthy');
+    expect(mock.query.mock.calls.slice(0, 2)).toEqual([
+      [
+        'SELECT pg_catalog.set_config($1, $2, false)',
+        ['statement_timeout', '5000'],
+      ],
+      [
+        'SELECT pg_catalog.set_config($1, $2, false)',
+        ['search_path', 'pg_catalog'],
+      ],
+    ]);
+  });
+
+  it('does not let an active probe raise a shorter batch statement timeout', async () => {
+    const mock = createClient(healthyState());
+
+    const result = await runDoctor(baseOptions(true), {
+      clientFactory: () => mock.client,
+      statementTimeoutMs: 5000,
+    });
+
+    expect(result.status).toBe('healthy');
+    expect(mock.query.mock.calls.filter(([sql]) =>
+      sql === 'SELECT pg_catalog.set_config($1, $2, true)'
+    )).toEqual(Array.from({ length: 5 }, () => [
+      'SELECT pg_catalog.set_config($1, $2, true)',
+      ['statement_timeout', '5000'],
+    ]));
+  });
+
   it('runs read-only A/B and no-context probes on one client with bound values', async () => {
     const mock = createClient(healthyState());
 

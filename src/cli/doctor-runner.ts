@@ -44,6 +44,7 @@ export async function runDoctor(
   let result: DoctorResult;
 
   try {
+    throwIfAborted(dependencies);
     try {
       client = (dependencies.clientFactory ?? defaultClientFactory)(validation.url);
     } catch (error) {
@@ -65,10 +66,29 @@ export async function runDoctor(
     }
 
     try {
-      await auditDoctorDatabase(client, validation, checks);
+      throwIfAborted(dependencies);
+      if (dependencies.statementTimeoutMs !== undefined) {
+        await client.query(
+          'SELECT pg_catalog.set_config($1, $2, false)',
+          ['statement_timeout', String(dependencies.statementTimeoutMs)],
+        );
+        throwIfAborted(dependencies);
+      }
+      await auditDoctorDatabase(
+        client,
+        validation,
+        checks,
+        dependencies.signal,
+        dependencies.statementTimeoutMs,
+      );
       result = doctorChecksResult(target, checks);
     } catch (error) {
-      const runtimeError = asRuntimeError(error, 'QUERY_FAILED');
+      const runtimeError = asRuntimeError(
+        error,
+        dependencies.signal?.aborted
+          ? abortedCode(dependencies)
+          : 'QUERY_FAILED',
+      );
       result = doctorErrorResult(
         runtimeError.code,
         redactDoctorError(runtimeError.message, validation.url),
@@ -77,7 +97,12 @@ export async function runDoctor(
       );
     }
   } catch (error) {
-    const runtimeError = asRuntimeError(error, 'QUERY_FAILED');
+    const runtimeError = asRuntimeError(
+      error,
+      dependencies.signal?.aborted
+        ? abortedCode(dependencies)
+        : 'QUERY_FAILED',
+    );
     result = doctorErrorResult(
       runtimeError.code,
       redactDoctorError(runtimeError.message, validation.url),
@@ -95,6 +120,25 @@ export async function runDoctor(
   }
 
   return result;
+}
+
+function throwIfAborted(dependencies: DoctorDependencies): void {
+  if (dependencies.signal?.aborted) {
+    throw new DoctorRuntimeError(
+      abortedCode(dependencies),
+      abortedCode(dependencies) === 'TIMEOUT'
+        ? 'Table audit exceeded the batch admission deadline.'
+        : 'Table audit was aborted.',
+    );
+  }
+}
+
+function abortedCode(
+  dependencies: DoctorDependencies,
+): Extract<DoctorError['code'], 'ABORTED' | 'TIMEOUT'> {
+  return dependencies.signal?.reason === 'TIMEOUT'
+    ? 'TIMEOUT'
+    : dependencies.abortCode ?? 'ABORTED';
 }
 
 function defaultClientFactory(url: string): DoctorClient {

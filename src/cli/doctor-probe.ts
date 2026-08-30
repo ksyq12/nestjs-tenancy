@@ -25,23 +25,52 @@ export async function runActiveDoctorProbes(
   options: ValidatedDoctorOptions,
   checks: DoctorCheck[],
   policyType: TenantColumnPolicyType,
+  signal?: AbortSignal,
+  statementTimeoutMs?: number,
 ): Promise<void> {
   const tenantA = options.tenantA as string;
   const tenantB = options.tenantB as string;
 
-  const initial = await noContextProbe(client, options, false);
+  throwIfAborted(signal);
+  const initial = await noContextProbe(client, options, false, signal, statementTimeoutMs);
   addNoContextCheck(checks, 'probe.no_context', 'Initial no-context probe', initial);
 
-  const a = await tenantProbe(client, options, tenantA, true, policyType);
+  throwIfAborted(signal);
+  const a = await tenantProbe(
+    client,
+    options,
+    tenantA,
+    true,
+    policyType,
+    signal,
+    statementTimeoutMs,
+  );
   addTenantProbeCheck(checks, 'probe.tenant_a', 'Tenant A', a);
 
-  const afterCommit = await noContextProbe(client, options, false);
+  throwIfAborted(signal);
+  const afterCommit = await noContextProbe(client, options, false, signal, statementTimeoutMs);
   addNoContextCheck(checks, 'probe.cleanup_after_commit', 'Post-COMMIT no-context probe', afterCommit);
 
-  const b = await tenantProbe(client, options, tenantB, false, policyType);
+  throwIfAborted(signal);
+  const b = await tenantProbe(
+    client,
+    options,
+    tenantB,
+    false,
+    policyType,
+    signal,
+    statementTimeoutMs,
+  );
   addTenantProbeCheck(checks, 'probe.tenant_b', 'Tenant B', b);
 
-  const afterRollback = await noContextProbe(client, options, false);
+  throwIfAborted(signal);
+  const afterRollback = await noContextProbe(
+    client,
+    options,
+    false,
+    signal,
+    statementTimeoutMs,
+  );
   addNoContextCheck(checks, 'probe.cleanup_after_rollback', 'Post-ROLLBACK no-context probe', afterRollback);
 }
 
@@ -49,8 +78,10 @@ async function noContextProbe(
   client: DoctorClient,
   options: ValidatedDoctorOptions,
   commit: boolean,
+  signal?: AbortSignal,
+  statementTimeoutMs?: number,
 ): Promise<{ setting: string | null; hasVisible: boolean }> {
-  return withReadOnlyTransaction(client, commit, async () => {
+  return withReadOnlyTransaction(client, commit, signal, statementTimeoutMs, async () => {
     const setting = (await client.query<SettingRow>(
       'SELECT current_setting($1, true) AS setting_value',
       [options.dbSettingKey],
@@ -69,8 +100,10 @@ async function tenantProbe(
   tenantId: string,
   commit: boolean,
   policyType: TenantColumnPolicyType,
+  signal?: AbortSignal,
+  statementTimeoutMs?: number,
 ): Promise<{ hasVisible: boolean; hasMismatch: boolean }> {
-  return withReadOnlyTransaction(client, commit, async () => {
+  return withReadOnlyTransaction(client, commit, signal, statementTimeoutMs, async () => {
     await client.query(
       'SELECT set_config($1, $2, true)',
       [options.dbSettingKey, tenantId],
@@ -99,16 +132,21 @@ async function tenantProbe(
 async function withReadOnlyTransaction<T>(
   client: DoctorClient,
   commit: boolean,
+  signal: AbortSignal | undefined,
+  statementTimeoutMs: number | undefined,
   action: () => Promise<T>,
 ): Promise<T> {
+  throwIfAborted(signal);
   await client.query('BEGIN READ ONLY');
   let finished = false;
   try {
     await client.query(
       'SELECT pg_catalog.set_config($1, $2, true)',
-      ['statement_timeout', '10000'],
+      ['statement_timeout', String(Math.min(statementTimeoutMs ?? 10_000, 10_000))],
     );
+    throwIfAborted(signal);
     const value = await action();
+    throwIfAborted(signal);
     await client.query(commit ? 'COMMIT' : 'ROLLBACK');
     finished = true;
     return value;
@@ -121,6 +159,10 @@ async function withReadOnlyTransaction<T>(
       }
     }
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('Doctor batch was interrupted.');
 }
 
 function addNoContextCheck(

@@ -1430,7 +1430,37 @@ DATABASE_URL='postgresql://app_user:...@localhost/app' \
   --role=app_user
 ```
 
-The catalog audit checks the current and login roles, `SUPERUSER` / `BYPASSRLS` and reachable role risks, table ownership, `ENABLE` / `FORCE` / active RLS state, tenant column and index, grants (including forbidden `TRUNCATE`), and the exact generated `USING` / `WITH CHECK` policy contract. Run the command once per tenant-scoped table.
+The catalog audit checks the current and login roles, `SUPERUSER` / `BYPASSRLS` and reachable role risks, table ownership, `ENABLE` / `FORCE` / active RLS state, tenant column and index, grants (including forbidden `TRUNCATE`), and the exact generated `USING` / `WITH CHECK` policy contract.
+
+To audit multiple tenant tables in one bounded run, create a versioned JSON manifest. The database URL is deliberately not a manifest field:
+
+```json
+{
+  "schemaVersion": 1,
+  "defaults": {
+    "role": "app_user",
+    "dbSettingKey": "app.current_tenant",
+    "tenantColumn": "tenant_id",
+    "tenantA": "11111111-1111-1111-1111-111111111111",
+    "tenantB": "22222222-2222-2222-2222-222222222222"
+  },
+  "tables": [
+    { "table": "public.users" },
+    { "table": "billing.invoices", "tenantColumn": "account_id" }
+  ]
+}
+```
+
+```bash
+DATABASE_URL='postgresql://app_user:...@localhost/app' \
+  npx @nestarc/tenancy doctor \
+  --manifest=tenancy-doctor.json \
+  --concurrency=4 \
+  --timeout-ms=60000 \
+  --json
+```
+
+Manifest defaults can be overridden per table. Results always follow manifest order even when tables finish out of order. A table-level connection or query error does not discard peer results; any operational error makes the aggregate exit code 2. Concurrency is limited to 1–16, and the batch timeout stops new work while allowing in-flight database cleanup to finish.
 
 Add an opt-in, read-only behavior probe with two tenant IDs that already have rows:
 
@@ -1445,6 +1475,8 @@ DATABASE_URL='postgresql://app_user:...@localhost/app' \
 ```
 
 The active probe verifies no-context fail-closed behavior, tenant A/B isolation, and setting cleanup after both COMMIT and ROLLBACK. It does not write data. If either tenant has no visible fixture row, the result is inconclusive rather than a false pass. Add `--json` for machine-readable output. Exit codes are 0 (healthy), 1 (finding or inconclusive probe), and 2 (usage, connection, or query error). Prefer `DATABASE_URL` over `--url` so credentials do not enter shell history or the process list.
+
+For a manifest, `--active` is still required explicitly on every invocation. Tenant A/B values come from manifest defaults or table overrides; the manifest alone can never enable live probes. Batch catalog and probe SQL use a per-session statement timeout, and aborts are honored between catalog queries and read-only probe transactions so an opened probe transaction is rolled back before its table result returns.
 
 ## License
 

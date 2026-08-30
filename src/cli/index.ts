@@ -1,4 +1,10 @@
-import type { DoctorOptions, DoctorResult } from './doctor';
+import { readFile } from 'fs/promises';
+import type {
+  DoctorBatchOptions,
+  DoctorBatchResult,
+  DoctorOptions,
+  DoctorResult,
+} from './doctor';
 
 export interface CliIo {
   log(message: string): void;
@@ -7,6 +13,8 @@ export interface CliIo {
 
 export interface CliDependencies {
   runDoctor?: (options: DoctorOptions) => Promise<DoctorResult>;
+  runDoctorBatch?: (options: DoctorBatchOptions) => Promise<DoctorBatchResult>;
+  readFile?: (path: string, encoding: BufferEncoding) => Promise<string>;
 }
 
 const defaultIo: CliIo = {
@@ -61,6 +69,28 @@ export async function runCli(
         io.log(doctor.doctorHelp());
       }
       return doctor.DoctorExitCode.ERROR;
+    }
+
+    if (parsed.kind === 'batch-options') {
+      const { json, manifestPath, ...execution } = parsed.options;
+      let manifest: unknown;
+      try {
+        const source = await (dependencies.readFile ?? readFile)(manifestPath, 'utf8');
+        manifest = JSON.parse(source) as unknown;
+      } catch {
+        const result = doctor.doctorBatchErrorResult(
+          'INVALID_MANIFEST',
+          'Could not read or parse the doctor manifest.',
+        );
+        io.log(doctor.formatDoctorBatchResult(result, json));
+        return result.exitCode;
+      }
+      const result = await (dependencies.runDoctorBatch ?? doctor.runDoctorBatch)({
+        ...execution,
+        manifest,
+      });
+      io.log(doctor.formatDoctorBatchResult(result, json));
+      return result.exitCode;
     }
 
     const { json, ...options } = parsed.options;

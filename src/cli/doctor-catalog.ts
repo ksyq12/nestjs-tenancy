@@ -219,7 +219,10 @@ export async function auditDoctorDatabase(
   client: DoctorClient,
   options: ValidatedDoctorOptions,
   checks: DoctorCheck[],
+  signal?: AbortSignal,
+  statementTimeoutMs?: number,
 ): Promise<void> {
+  throwIfAborted(signal);
   await client.query(
     'SELECT pg_catalog.set_config($1, $2, false)',
     ['search_path', 'pg_catalog'],
@@ -230,6 +233,7 @@ export async function auditDoctorDatabase(
   }
 
   const role = (await client.query<RoleRow>(ROLE_SQL, [options.role])).rows[0];
+  throwIfAborted(signal);
   const table = (await client.query<TableRow>(
     TABLE_SQL,
     [options.schema, options.table, options.role],
@@ -249,12 +253,16 @@ export async function auditDoctorDatabase(
     COLUMN_SQL,
     [table.table_oid, options.tenantColumn],
   );
+  throwIfAborted(signal);
   const privilegeResult = await client.query<PrivilegeRow>(
     PRIVILEGE_SQL,
     [options.role, table.table_oid, options.schema],
   );
+  throwIfAborted(signal);
   const policyResult = await client.query<PolicyRow>(POLICY_SQL, [table.table_oid]);
+  throwIfAborted(signal);
   const reachableRoles = await queryReachableRoles(client, options.role, table.table_owner);
+  throwIfAborted(signal);
 
   const column = columnResult.rows[0];
   const privileges = privilegeResult.rows[0];
@@ -262,6 +270,7 @@ export async function auditDoctorDatabase(
   const index = column
     ? (await client.query<IndexRow>(INDEX_SQL, [table.table_oid, column.attribute_number])).rows[0]
     : undefined;
+  throwIfAborted(signal);
 
   addCatalogChecks(checks, table, column, index, privileges, options);
   addReachableRoleChecks(checks, reachableRoles.rows, reachableRoles.mode, table.table_owner);
@@ -324,7 +333,13 @@ export async function auditDoctorDatabase(
     options,
     checks,
     column?.policy_type as TenantColumnPolicyType,
+    signal,
+    statementTimeoutMs,
   );
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('Doctor batch was interrupted.');
 }
 
 function addSessionChecks(

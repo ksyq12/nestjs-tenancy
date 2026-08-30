@@ -12,6 +12,7 @@ export type {
   DoctorCheckCategory,
   DoctorCheckStatus,
   DoctorCliOptions,
+  DoctorBatchCliOptions,
   DoctorCliParseResult,
   DoctorClient,
   DoctorDependencies,
@@ -25,3 +26,17 @@ export type {
   DoctorTarget,
 } from './doctor-contract';
 export { runDoctor } from './doctor-runner';
+export {
+  doctorBatchErrorResult,
+  formatDoctorBatchResult,
+  runDoctorBatch,
+} from './doctor-batch';
+export type {
+  DoctorBatchDependencies,
+  DoctorBatchOptions,
+  DoctorBatchResult,
+  DoctorBatchSummary,
+  DoctorManifest,
+  DoctorManifestDefaults,
+  DoctorManifestEntry,
+} from './doctor-batch';
