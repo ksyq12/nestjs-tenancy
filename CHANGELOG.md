@@ -6,6 +6,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Tests
+
+- Advanced the legacy and modern published-only ecosystem locks to
+  `@nestarc/tenancy@0.16.0` after publication and verified the exact registry
+  artifact integrity in both full-flow fixtures.
+
 ## [0.16.0] - 2026-08-30
 
 ### Changed (Breaking)

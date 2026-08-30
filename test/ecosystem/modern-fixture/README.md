@@ -13,7 +13,7 @@ the verifier checks the installed name/version, public npm resolution,
 lockfile SHA-512 integrity, non-link/non-symlink status, and isolated realpath.
 
 `@opentelemetry/api@1.9.1` is an exact supporting dependency because tenancy
-0.15.0's exported telemetry declaration references its public types when this
+0.16.0's exported telemetry declaration references its public types when this
 consumer compiles with `skipLibCheck=false`.
 
 The E2E command enables Node's VM modules for Prisma 7's generated query

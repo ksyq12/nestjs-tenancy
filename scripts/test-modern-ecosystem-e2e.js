@@ -26,7 +26,7 @@ const DEFAULT_DATABASE_URL =
 const DEFAULT_APP_DATABASE_URL =
   'postgresql://ecosystem_app:ecosystem_app@127.0.0.1:5433/tenancy_test';
 const MODERN_PACKAGE_VERSIONS = Object.freeze({
-  '@nestarc/tenancy': '0.15.0',
+  '@nestarc/tenancy': '0.16.0',
   '@nestarc/api-keys': '0.3.2',
   '@nestarc/rbac': '0.2.1',
   '@nestarc/jobs': '0.3.1',

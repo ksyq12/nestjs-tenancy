@@ -168,7 +168,7 @@ describe('installed Nestarc ecosystem compatibility fixture', () => {
     );
     const expected = {
       '@nestarc/tenancy':
-        process.env.TENANCY_CANDIDATE_VERSION ?? '0.15.0',
+        process.env.TENANCY_CANDIDATE_VERSION ?? '0.16.0',
       '@nestarc/api-keys': '0.3.1',
       '@nestarc/rbac': '0.2.0',
       '@nestarc/jobs': '0.3.1',

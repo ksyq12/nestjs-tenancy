@@ -39,7 +39,7 @@ const {
 } = require('../ecosystem/modern-fixture/scripts/verify-packages.cjs');
 
 const EXPECTED_MODERN_VERSIONS = {
-  '@nestarc/tenancy': '0.15.0',
+  '@nestarc/tenancy': '0.16.0',
   '@nestarc/api-keys': '0.3.2',
   '@nestarc/rbac': '0.2.1',
   '@nestarc/jobs': '0.3.1',
@@ -61,7 +61,7 @@ const EXPECTED_MODERN_VERSIONS = {
 
 const EXPECTED_NESTARC_INTEGRITIES = {
   '@nestarc/tenancy':
-    'sha512-pFwq7Ja3QwVymGu5GyADm3j2EHxmd0RpTRPW+6/DxuoMD6NZ+8drWQEt2fBI79ReVDDqHSYD820BYWiQJsDh+Q==',
+    'sha512-JqMtY9FHJSHr7QY5XAB0rlTGzVtpgqRKH1sycy1H8MGIRdIPTASxC6YwLL5N2ujUCLGIt8f0qNh10I58KoB/Tw==',
   '@nestarc/api-keys':
     'sha512-powmFRJjXk6VSsZ9IXy4n/xvts6W7wOXZgWVDTTfcKUqTQv8it34jXwRqc3dytTsBc27kki/OW13hhd6Zy4rOA==',
   '@nestarc/rbac':

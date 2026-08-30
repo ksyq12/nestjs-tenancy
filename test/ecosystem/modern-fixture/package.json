@@ -12,7 +12,7 @@
     "@nestarc/jobs": "0.3.1",
     "@nestarc/outbox": "0.2.1",
     "@nestarc/rbac": "0.2.1",
-    "@nestarc/tenancy": "0.15.0",
+    "@nestarc/tenancy": "0.16.0",
     "@nestarc/webhook": "0.13.1",
     "@nestjs/common": "11.2.1",
     "@nestjs/core": "11.2.1",

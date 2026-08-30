@@ -25,7 +25,7 @@ type ReceivedWebhook = {
 };
 
 const expectedPackages = {
-  '@nestarc/tenancy': '0.15.0',
+  '@nestarc/tenancy': '0.16.0',
   '@nestarc/api-keys': '0.3.2',
   '@nestarc/rbac': '0.2.1',
   '@nestarc/jobs': '0.3.1',
