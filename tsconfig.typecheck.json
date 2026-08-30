@@ -22,6 +22,7 @@
     // graphs and tsconfig files. Their dedicated gates validate them after install.
     "test/compat/fixture/**",
     "test/ecosystem/fixture/**",
+    "test/ecosystem/modern-fixture/**",
     "test/package-consumer/fixture/**"
   ]
 }

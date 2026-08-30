@@ -20,6 +20,7 @@ export default tseslint.config(
       'test/e2e/generated/',
       'test/e2e/generated-v6-native/',
       'test/ecosystem/fixture/',
+      'test/ecosystem/modern-fixture/',
       'node_modules/',
     ],
   },

@@ -13,7 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `TenantValidationFailedEvent`, and `TenantCrossCheckFailedEvent` payload
   declarations. Listeners must use the allow-listed `requestSummary`; JavaScript
   and custom emitters must also stop attaching or consuming the raw field.
-- Raised the supported Node.js runtime contract from `>=20.19.0` to `^22.13.0 || ^24.0.0`, removed the EOL Node.js 20 CI lane, and aligned development types with Node.js 22. This pre-1.0 breaking change is planned for 0.16.0; Node.js 20 consumers must upgrade their runtime or remain on 0.15.x. Publishing 0.16.0 remains on hold until the tracked sibling-package compatibility evidence is complete.
+- Raised the supported Node.js runtime contract from `>=20.19.0` to `^22.13.0 || ^24.0.0`, removed the EOL Node.js 20 CI lane, and aligned development types with Node.js 22. This pre-1.0 breaking change is planned for 0.16.0; Node.js 20 consumers must upgrade their runtime or remain on 0.15.x. The tracked sibling-package compatibility prerequisite is complete; publishing 0.16.0 remains a separate release action.
 - Changed CLI-generated index and policy names for uppercase, punctuation, Unicode, or overlong schema/table/tenant-column inputs to use deterministic 12-hex SHA-256 suffixes within PostgreSQL's 63-byte limit. Existing lowercase ASCII short names remain unchanged, except that the old explicit-`public_` form now shares the implicit-public identity; operators with affected generated names must review and migrate the live objects before adopting the regenerated canonical SQL.
 - Changed `tenancy init` to require each non-shared model to map exactly one required scalar `String` field to the physical tenant column. Missing, duplicate, nullable, list, `@ignore`, non-String, `Unsupported`, and unknown native tenant types now stop scaffolding before generated files are written instead of falling back to an assumed text policy.
 - Changed generated RLS to add one restrictive non-empty context guard per tenant table. Valid non-empty TEXT predicates remain unchanged, while reset/no-context access to an existing empty tenant row and no-context insertion of a new one are now denied; existing deployments must regenerate or sequentially reapply the SQL, pass `tenancy check`, and verify the new guard with `tenancy doctor`. Markerless legacy SQL remains structurally supported but is now reported as drift when this semantic guard is missing or invalid.
@@ -49,10 +49,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Tests
 
-- Split the Nestarc ecosystem runner into explicit `published-only` and
-  tenancy `local-artifact` modes, removed ambient sibling discovery, committed
-  the fixture lockfile, and added strict installed name/version/source/SHA-512
-  assertions while preserving the NestJS 10 + Prisma 6 full flow.
+- Preserved the committed, fully published NestJS 10.4.20 / Prisma 6.19.3
+  ecosystem full-flow lane and its explicit unpublished-tenancy
+  `local-artifact` mode, with no ambient sibling discovery.
+- Added a separate fully published NestJS 11.2.1 / Prisma 7.10.0 ecosystem
+  lane after API Keys 0.3.2, RBAC 0.2.1, Outbox 0.2.1, Webhook 0.13.1, and the
+  Jobs 0.3.1 published-Outbox gate completed their compatibility prerequisites.
+  Its strict installer validates the complete lock and installed inventory for
+  public-registry resolution, exact version, SHA-512 integrity, and
+  non-link/non-symlink isolation before running the API key → tenancy → RBAC
+  → RLS/outbox → jobs → webhook real-database flow. The independent
+  `ecosystem-modern-e2e` job is included in reusable CI and release validation.
 - Added source and strict packed-consumer public type probes that keep both
   deprecated surfaces available until their scheduled removal releases across
   the exact Prisma 6.19.3/7.10.0 compatibility matrix.
@@ -75,7 +82,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   the [deprecated API removal ADR](https://github.com/nestarc/nestjs-tenancy/blob/main/docs/2026-08-30-deprecated-api-removal-adr.md). TEN-B09 now implements the v0.16.0 event-field removal while preserving transparent transaction support through v0.16.x.
 - Documented the exact four-way NestJS/Prisma consumer evidence, valid optional cache/event pairings, and the separation between install/type/runtime smoke and database behavior lanes.
 - Defined the latest-minor-only security support policy for the current 0.15.x line and separated the already-published Node.js contract, the Unreleased 0.16.0 contract, and the NestJS/Prisma combinations actually exercised by CI.
-- Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, and the 0.16.0 compatibility-evidence release hold.
+- Documented the exact Node.js 22.13.0 minimum lane, current Node.js 22/24 lanes, completion of the sibling-package compatibility prerequisite, and the separate 0.16.0 publish action.
 - Corrected the private vulnerability reporting path and centralized the current raw Prisma query, WebSocket, and managed-pooler guarantee boundaries.
 - Added the inbound RPC validation compatibility ADR and clarified that tenant propagation, format validation, and context restoration do not authenticate message producers or authorize access to the claimed tenant.
 - Documented the generated-name compatibility boundary and the reviewed migration required when legacy non-canonical names change to hashed identifiers.

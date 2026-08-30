@@ -50,6 +50,7 @@
     "test:e2e:ecosystem": "npm run test:e2e:ecosystem:published-only",
     "test:e2e:ecosystem:published-only": "node scripts/test-ecosystem-e2e.js --mode published-only",
     "test:e2e:ecosystem:local-artifact": "node scripts/test-ecosystem-e2e.js --mode local-artifact",
+    "test:e2e:ecosystem:modern:published-only": "node scripts/test-modern-ecosystem-e2e.js",
     "test:e2e:redis": "node scripts/test-redis-e2e.js",
     "test:e2e:pgbouncer": "node scripts/test-pgbouncer-e2e.js",
     "bench": "npx ts-node benchmarks/rls-overhead.ts",

@@ -57,6 +57,24 @@ const PRE_REFACTOR_GRAPH = {
   },
 } as const;
 
+const REQUIRED_VALIDATION_JOBS = [
+  ...PRE_REFACTOR_GRAPH.validationJobs,
+  'ecosystem-modern-e2e',
+] as const;
+const REQUIRED_RELEASE_JOBS = [
+  ...PRE_REFACTOR_GRAPH.releaseJobs.slice(0, -1),
+  'ecosystem-modern-e2e',
+  'publish',
+] as const;
+const REQUIRED_PUBLISH_NEEDS = [
+  ...PRE_REFACTOR_GRAPH.publishNeeds,
+  'ecosystem-modern-e2e',
+] as const;
+const REQUIRED_MATRIX_CARDINALITY = {
+  ...PRE_REFACTOR_GRAPH.matrixCardinality,
+  'ecosystem-modern-e2e': 1,
+} as const;
+
 const JOB_TIMEOUTS = {
   test: 15,
   compat: 20,
@@ -65,6 +83,7 @@ const JOB_TIMEOUTS = {
   'pgbouncer-e2e': 20,
   'redis-e2e': 10,
   'ecosystem-e2e': 20,
+  'ecosystem-modern-e2e': 20,
 } as const;
 
 const GATE_RUN_COMMANDS = {
@@ -96,6 +115,10 @@ const GATE_RUN_COMMANDS = {
     'npm ci',
     'npm run test:e2e:ecosystem:published-only',
   ],
+  'ecosystem-modern-e2e': [
+    'npm ci',
+    'npm run test:e2e:ecosystem:modern:published-only',
+  ],
 } as const;
 
 const GATE_ACTIONS = {
@@ -110,6 +133,10 @@ const GATE_ACTIONS = {
   'pgbouncer-e2e': ['actions/checkout@v6', 'actions/setup-node@v6'],
   'redis-e2e': ['actions/checkout@v6', 'actions/setup-node@v6'],
   'ecosystem-e2e': ['actions/checkout@v6', 'actions/setup-node@v6'],
+  'ecosystem-modern-e2e': [
+    'actions/checkout@v6',
+    'actions/setup-node@v6',
+  ],
 } as const;
 
 const POSTGRES_IMAGE =
@@ -248,10 +275,8 @@ describe('shared validation workflow', () => {
     >;
   };
 
-  it('keeps the pre-refactor validation job and matrix inventory exact', () => {
-    expect(readJobIds(ciWorkflow)).toEqual([
-      ...PRE_REFACTOR_GRAPH.validationJobs,
-    ]);
+  it('keeps the pre-refactor validation inventory and adds the modern ecosystem gate', () => {
+    expect(readJobIds(ciWorkflow)).toEqual([...REQUIRED_VALIDATION_JOBS]);
 
     const sourceGates = readJobBlock(ciWorkflow, 'test');
     const sourceVersions = [
@@ -296,6 +321,7 @@ describe('shared validation workflow', () => {
       'pgbouncer-e2e': prismaVersions.length,
       'redis-e2e': 1,
       'ecosystem-e2e': 1,
+      'ecosystem-modern-e2e': 1,
     };
 
     expect(sourceVersions).toEqual(['22.13.0', '22', '24']);
@@ -318,9 +344,9 @@ describe('shared validation workflow', () => {
       '7.10.0',
     ]);
     expect(prismaVersions).toEqual(['6.19.3', '7.10.0']);
-    expect(actualCardinality).toEqual(PRE_REFACTOR_GRAPH.matrixCardinality);
+    expect(actualCardinality).toEqual(REQUIRED_MATRIX_CARDINALITY);
     expect(Object.values(actualCardinality).reduce((a, b) => a + b, 0)).toBe(
-      13,
+      14,
     );
     expect(sourceGates).not.toMatch(/^ {8}exclude:/m);
     expect(compat).not.toMatch(/^ {8}(include|exclude):/m);
@@ -360,8 +386,12 @@ describe('shared validation workflow', () => {
     }
   });
 
-  it('uses the explicit published-only ecosystem baseline in CI and release', () => {
+  it('uses explicit legacy and modern published-only ecosystem baselines', () => {
     const ecosystem = readJobBlock(ciWorkflow, 'ecosystem-e2e');
+    const modernEcosystem = readJobBlock(
+      ciWorkflow,
+      'ecosystem-modern-e2e',
+    );
 
     expect(readRunCommands(ecosystem)).toContain(
       'npm run test:e2e:ecosystem:published-only',
@@ -372,6 +402,14 @@ describe('shared validation workflow', () => {
     expect(packageManifest.scripts['test:e2e:ecosystem']).toBe(
       'npm run test:e2e:ecosystem:published-only',
     );
+    expect(readRunCommands(modernEcosystem)).toContain(
+      'npm run test:e2e:ecosystem:modern:published-only',
+    );
+    expect(
+      packageManifest.scripts[
+        'test:e2e:ecosystem:modern:published-only'
+      ],
+    ).toBe('node scripts/test-modern-ecosystem-e2e.js');
   });
 
   it('cancels only superseded pull request runs', () => {
@@ -409,7 +447,11 @@ describe('shared validation workflow', () => {
       ...ciWorkflow.matchAll(/^ {8}image: (postgres:.+)$/gm),
     ].map((match) => match[1]);
 
-    expect(postgresImages).toEqual([POSTGRES_IMAGE, POSTGRES_IMAGE]);
+    expect(postgresImages).toEqual([
+      POSTGRES_IMAGE,
+      POSTGRES_IMAGE,
+      POSTGRES_IMAGE,
+    ]);
   });
 
   it('keeps every validation gate command required and exact', () => {
@@ -451,12 +493,12 @@ describe('shared validation workflow', () => {
     const publish = readJobBlock(releaseWorkflow, 'publish');
     const expandedReleaseJobs = releaseJobIds.flatMap((jobId) =>
       jobId === 'validation'
-        ? [...PRE_REFACTOR_GRAPH.validationJobs]
+        ? [...REQUIRED_VALIDATION_JOBS]
         : [jobId],
     );
     const expandedPublishNeeds = readNeeds(publish).flatMap((jobId) =>
       jobId === 'validation'
-        ? [...PRE_REFACTOR_GRAPH.validationJobs]
+        ? [...REQUIRED_VALIDATION_JOBS]
         : [jobId],
     );
 
@@ -469,8 +511,8 @@ describe('shared validation workflow', () => {
     expect(readNeeds(publish)).toEqual(['validation']);
     expectRequiredJob(publish);
     expect(readTimeout(publish)).toBe(15);
-    expect(expandedReleaseJobs).toEqual(PRE_REFACTOR_GRAPH.releaseJobs);
-    expect(expandedPublishNeeds).toEqual(PRE_REFACTOR_GRAPH.publishNeeds);
+    expect(expandedReleaseJobs).toEqual(REQUIRED_RELEASE_JOBS);
+    expect(expandedPublishNeeds).toEqual(REQUIRED_PUBLISH_NEEDS);
   });
 
   it('verifies release provenance before npm publish', () => {

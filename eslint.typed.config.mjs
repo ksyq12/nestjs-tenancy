@@ -9,6 +9,7 @@ export default tseslint.config(
       'test/e2e/generated-v6-native/',
       'test/compat/fixture/',
       'test/ecosystem/fixture/',
+      'test/ecosystem/modern-fixture/',
       'test/package-consumer/fixture/',
       'node_modules/',
     ],
